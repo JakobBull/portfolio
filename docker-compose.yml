@@ -1,0 +1,28 @@
+version: '3'
+
+services:
+  portfolio-app:
+    build:
+      context: .
+      args:
+        SKIP_TESTS: "true"  # Skip tests in the main build
+    container_name: portfolio-manager
+    ports:
+      - "8050:8050"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+      
+  test:
+    build:
+      context: .
+      args:
+        SKIP_TESTS: "false"  # Run tests in the test build
+    container_name: portfolio-tests
+    command: python run_tests.py
+    volumes:
+      - ./tests:/app/tests
+    environment:
+      - PYTHONUNBUFFERED=1 

@@ -1,0 +1,20 @@
+{
+  "BPOST.BR": {
+    "ticker": "BPOST.BR",
+    "fetch_date": "2025-03-16",
+    "success": false,
+    "error": "cannot reindex on an axis with duplicate labels"
+  },
+  "AAPL": {
+    "ticker": "AAPL",
+    "fetch_date": "2025-03-16",
+    "success": false,
+    "error": "cannot reindex on an axis with duplicate labels"
+  },
+  "ALV": {
+    "ticker": "ALV",
+    "fetch_date": "2025-03-16",
+    "success": false,
+    "error": "cannot reindex on an axis with duplicate labels"
+  }
+}

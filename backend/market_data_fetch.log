@@ -1,0 +1,144 @@
+2025-03-16 20:49:01,121 - fetch_market_data - INFO - Found 3 tickers in portfolio
+2025-03-16 20:49:01,121 - fetch_market_data - INFO - Found 0 tickers in watchlist
+2025-03-16 20:49:01,121 - fetch_market_data - INFO - Total unique tickers to track: 3
+2025-03-16 20:49:01,122 - backend.market_interface - INFO - Market interface initialized with database and rate limiting
+2025-03-16 20:49:01,122 - fetch_market_data - INFO - Earliest portfolio position date: 2024-08-15
+2025-03-16 20:49:01,122 - fetch_market_data - INFO - Fetching market data for 3 tickers
+2025-03-16 20:49:01,122 - fetch_market_data - INFO - Portfolio tickers: 3
+2025-03-16 20:49:01,122 - fetch_market_data - INFO - Watchlist tickers: 0
+2025-03-16 20:49:01,122 - fetch_market_data - INFO - Processing ticker 1/3: ALV
+2025-03-16 20:49:01,124 - backend.market_interface - INFO - Using stock price from close date 2025-03-14 for ALV
+2025-03-16 20:49:01,124 - fetch_market_data - INFO - Current price for ALV: 90.1500015258789
+2025-03-16 20:49:01,124 - fetch_market_data - INFO - Fetching recent historical data for ALV (last 7 days)
+2025-03-16 20:49:01,124 - backend.market_interface - INFO - Adjusted start date from 2025-03-09 to last trading day 2025-03-07
+2025-03-16 20:49:01,124 - backend.market_interface - INFO - Adjusted end date from 2025-03-16 to last trading day 2025-03-14
+2025-03-16 20:49:01,484 - backend.market_interface - ERROR - Error processing Yahoo Finance data: Data must be 1-dimensional, got ndarray of shape (6, 1) instead
+2025-03-16 20:49:01,487 - backend.market_interface - INFO - Successfully fetched 6 historical prices for ALV
+2025-03-16 20:49:01,498 - backend.database - INFO - Stored 6 data points for ALV (0 errors)
+2025-03-16 20:49:01,500 - fetch_market_data - INFO - Imputing missing values for ALV
+2025-03-16 20:49:01,502 - fetch_market_data - INFO - Retrieved 8 historical price points for ALV
+2025-03-16 20:49:01,502 - fetch_market_data - INFO - Storing complete historical prices for portfolio ticker ALV
+2025-03-16 20:49:01,508 - backend.database - INFO - Stored 8 data points for ALV (0 errors)
+2025-03-16 20:49:02,514 - fetch_market_data - INFO - Processing ticker 2/3: BPOST.BR
+2025-03-16 20:49:02,521 - backend.market_interface - INFO - Using stock price from close date 2025-03-14 for BPOST.BR
+2025-03-16 20:49:02,522 - fetch_market_data - INFO - Current price for BPOST.BR: 1.5
+2025-03-16 20:49:02,522 - fetch_market_data - INFO - Fetching recent historical data for BPOST.BR (last 7 days)
+2025-03-16 20:49:02,522 - backend.market_interface - INFO - Adjusted start date from 2025-03-09 to last trading day 2025-03-07
+2025-03-16 20:49:02,522 - backend.market_interface - INFO - Adjusted end date from 2025-03-16 to last trading day 2025-03-14
+2025-03-16 20:49:02,622 - backend.market_interface - ERROR - Error processing Yahoo Finance data: Data must be 1-dimensional, got ndarray of shape (6, 1) instead
+2025-03-16 20:49:02,626 - backend.market_interface - INFO - Successfully fetched 6 historical prices for BPOST.BR
+2025-03-16 20:49:02,634 - backend.database - INFO - Stored 6 data points for BPOST.BR (0 errors)
+2025-03-16 20:49:02,635 - fetch_market_data - INFO - Imputing missing values for BPOST.BR
+2025-03-16 20:49:02,637 - fetch_market_data - INFO - Retrieved 8 historical price points for BPOST.BR
+2025-03-16 20:49:02,637 - fetch_market_data - INFO - Storing complete historical prices for portfolio ticker BPOST.BR
+2025-03-16 20:49:02,644 - backend.database - INFO - Stored 8 data points for BPOST.BR (0 errors)
+2025-03-16 20:49:03,650 - fetch_market_data - INFO - Processing ticker 3/3: AAPL
+2025-03-16 20:49:03,657 - backend.market_interface - INFO - Using stock price from close date 2025-03-14 for AAPL
+2025-03-16 20:49:03,657 - fetch_market_data - INFO - Current price for AAPL: 213.49000549316406
+2025-03-16 20:49:03,657 - fetch_market_data - INFO - Fetching recent historical data for AAPL (last 7 days)
+2025-03-16 20:49:03,657 - backend.market_interface - INFO - Adjusted start date from 2025-03-09 to last trading day 2025-03-07
+2025-03-16 20:49:03,657 - backend.market_interface - INFO - Adjusted end date from 2025-03-16 to last trading day 2025-03-14
+2025-03-16 20:49:03,829 - backend.market_interface - ERROR - Error processing Yahoo Finance data: Data must be 1-dimensional, got ndarray of shape (6, 1) instead
+2025-03-16 20:49:03,833 - backend.market_interface - INFO - Successfully fetched 6 historical prices for AAPL
+2025-03-16 20:49:03,841 - backend.database - INFO - Stored 6 data points for AAPL (0 errors)
+2025-03-16 20:49:03,842 - fetch_market_data - INFO - Imputing missing values for AAPL
+2025-03-16 20:49:03,844 - fetch_market_data - INFO - Retrieved 8 historical price points for AAPL
+2025-03-16 20:49:03,844 - fetch_market_data - INFO - Storing complete historical prices for portfolio ticker AAPL
+2025-03-16 20:49:03,851 - backend.database - INFO - Stored 8 data points for AAPL (0 errors)
+2025-03-16 20:49:04,857 - fetch_market_data - INFO - Market data fetch complete. Success: 3, Failure: 0
+2025-03-16 20:49:04,859 - fetch_market_data - INFO - Saved latest market data to JSON file
+2025-03-16 20:49:04,859 - fetch_market_data - INFO - Fetching benchmark data
+2025-03-16 20:49:04,859 - backend.market_interface - INFO - Market interface initialized with database and rate limiting
+2025-03-16 20:49:04,862 - fetch_market_data - INFO - Earliest portfolio position date: 2024-08-15
+2025-03-16 20:49:04,862 - fetch_market_data - INFO - Fetching benchmark data from 2024-03-16 to 2025-03-16
+2025-03-16 20:49:04,862 - fetch_market_data - INFO - Processing benchmark ^GSPC
+2025-03-16 20:49:04,862 - backend.market_interface - INFO - Adjusted start date from 2024-03-16 to last trading day 2024-03-15
+2025-03-16 20:49:04,862 - backend.market_interface - INFO - Adjusted end date from 2025-03-16 to last trading day 2025-03-14
+2025-03-16 20:49:04,941 - backend.market_interface - ERROR - Error processing Yahoo Finance data: Data must be 1-dimensional, got ndarray of shape (250, 1) instead
+2025-03-16 20:49:04,973 - backend.market_interface - INFO - Successfully fetched 250 historical prices for ^GSPC
+2025-03-16 20:49:05,036 - backend.database - INFO - Stored 250 data points for ^GSPC (0 errors)
+2025-03-16 20:49:05,037 - fetch_market_data - INFO - Imputing missing values for benchmark ^GSPC
+2025-03-16 20:49:05,038 - fetch_market_data - INFO - Retrieved 365 historical price points for benchmark ^GSPC
+2025-03-16 20:49:05,124 - backend.database - INFO - Stored 365 data points for ^GSPC (0 errors)
+2025-03-16 20:49:05,124 - fetch_market_data - INFO - Stored historical prices for benchmark ^GSPC
+2025-03-16 20:49:06,129 - fetch_market_data - INFO - Processing benchmark ^IXIC
+2025-03-16 20:49:06,130 - backend.market_interface - INFO - Adjusted start date from 2024-03-16 to last trading day 2024-03-15
+2025-03-16 20:49:06,130 - backend.market_interface - INFO - Adjusted end date from 2025-03-16 to last trading day 2025-03-14
+2025-03-16 20:49:06,227 - backend.market_interface - ERROR - Error processing Yahoo Finance data: Data must be 1-dimensional, got ndarray of shape (250, 1) instead
+2025-03-16 20:49:06,263 - backend.market_interface - INFO - Successfully fetched 250 historical prices for ^IXIC
+2025-03-16 20:49:06,327 - backend.database - INFO - Stored 250 data points for ^IXIC (0 errors)
+2025-03-16 20:49:06,327 - fetch_market_data - INFO - Imputing missing values for benchmark ^IXIC
+2025-03-16 20:49:06,328 - fetch_market_data - INFO - Retrieved 365 historical price points for benchmark ^IXIC
+2025-03-16 20:49:06,411 - backend.database - INFO - Stored 365 data points for ^IXIC (0 errors)
+2025-03-16 20:49:06,411 - fetch_market_data - INFO - Stored historical prices for benchmark ^IXIC
+2025-03-16 20:49:07,416 - fetch_market_data - INFO - Processing benchmark ^GDAXI
+2025-03-16 20:49:07,417 - backend.market_interface - INFO - Adjusted start date from 2024-03-16 to last trading day 2024-03-15
+2025-03-16 20:49:07,417 - backend.market_interface - INFO - Adjusted end date from 2025-03-16 to last trading day 2025-03-14
+2025-03-16 20:49:07,514 - backend.market_interface - ERROR - Error processing Yahoo Finance data: Data must be 1-dimensional, got ndarray of shape (253, 1) instead
+2025-03-16 20:49:07,563 - backend.market_interface - INFO - Successfully fetched 253 historical prices for ^GDAXI
+2025-03-16 20:49:07,628 - backend.database - INFO - Stored 253 data points for ^GDAXI (0 errors)
+2025-03-16 20:49:07,629 - fetch_market_data - INFO - Imputing missing values for benchmark ^GDAXI
+2025-03-16 20:49:07,630 - fetch_market_data - INFO - Retrieved 365 historical price points for benchmark ^GDAXI
+2025-03-16 20:49:07,711 - backend.database - INFO - Stored 365 data points for ^GDAXI (0 errors)
+2025-03-16 20:49:07,711 - fetch_market_data - INFO - Stored historical prices for benchmark ^GDAXI
+2025-03-16 20:49:08,716 - fetch_market_data - INFO - Benchmark data fetch complete
+2025-03-16 20:53:18,789 - fetch_market_data - INFO - Found 3 tickers in portfolio
+2025-03-16 20:53:18,791 - fetch_market_data - INFO - Found 0 tickers in watchlist
+2025-03-16 20:53:18,791 - fetch_market_data - INFO - Total unique tickers to track: 3
+2025-03-16 20:53:18,791 - backend.market_interface - INFO - Market interface initialized with database and rate limiting
+2025-03-16 20:53:18,791 - fetch_market_data - INFO - Earliest portfolio position date: 2024-08-15
+2025-03-16 20:53:18,791 - fetch_market_data - INFO - Fetching market data for 3 tickers
+2025-03-16 20:53:18,791 - fetch_market_data - INFO - Portfolio tickers: 3
+2025-03-16 20:53:18,791 - fetch_market_data - INFO - Watchlist tickers: 0
+2025-03-16 20:53:18,791 - fetch_market_data - INFO - Processing ticker 1/3: BPOST.BR
+2025-03-16 20:53:18,794 - backend.market_interface - INFO - Using stock price from close date 2025-03-14 for BPOST.BR
+2025-03-16 20:53:18,794 - fetch_market_data - INFO - Current price for BPOST.BR: 1.5
+2025-03-16 20:53:18,794 - fetch_market_data - INFO - Fetching recent historical data for BPOST.BR (last 7 days)
+2025-03-16 20:53:18,794 - backend.market_interface - INFO - Adjusted start date from 2025-03-09 to last trading day 2025-03-07
+2025-03-16 20:53:18,794 - backend.market_interface - INFO - Adjusted end date from 2025-03-16 to last trading day 2025-03-14
+2025-03-16 20:53:18,795 - fetch_market_data - INFO - Imputing missing values for BPOST.BR
+2025-03-16 20:53:18,796 - fetch_market_data - ERROR - Error processing ticker BPOST.BR: cannot reindex on an axis with duplicate labels
+2025-03-16 20:53:18,796 - fetch_market_data - INFO - Processing ticker 2/3: AAPL
+2025-03-16 20:53:18,797 - backend.market_interface - INFO - Using stock price from close date 2025-03-14 for AAPL
+2025-03-16 20:53:18,797 - fetch_market_data - INFO - Current price for AAPL: 213.49000549316406
+2025-03-16 20:53:18,797 - fetch_market_data - INFO - Fetching recent historical data for AAPL (last 7 days)
+2025-03-16 20:53:18,797 - backend.market_interface - INFO - Adjusted start date from 2025-03-09 to last trading day 2025-03-07
+2025-03-16 20:53:18,797 - backend.market_interface - INFO - Adjusted end date from 2025-03-16 to last trading day 2025-03-14
+2025-03-16 20:53:18,798 - fetch_market_data - INFO - Imputing missing values for AAPL
+2025-03-16 20:53:18,798 - fetch_market_data - ERROR - Error processing ticker AAPL: cannot reindex on an axis with duplicate labels
+2025-03-16 20:53:18,798 - fetch_market_data - INFO - Processing ticker 3/3: ALV
+2025-03-16 20:53:18,799 - backend.market_interface - INFO - Using stock price from close date 2025-03-14 for ALV
+2025-03-16 20:53:18,799 - fetch_market_data - INFO - Current price for ALV: 90.1500015258789
+2025-03-16 20:53:18,799 - fetch_market_data - INFO - Fetching recent historical data for ALV (last 7 days)
+2025-03-16 20:53:18,799 - backend.market_interface - INFO - Adjusted start date from 2025-03-09 to last trading day 2025-03-07
+2025-03-16 20:53:18,799 - backend.market_interface - INFO - Adjusted end date from 2025-03-16 to last trading day 2025-03-14
+2025-03-16 20:53:18,800 - fetch_market_data - INFO - Imputing missing values for ALV
+2025-03-16 20:53:18,800 - fetch_market_data - ERROR - Error processing ticker ALV: cannot reindex on an axis with duplicate labels
+2025-03-16 20:53:18,800 - fetch_market_data - INFO - Market data fetch complete. Success: 0, Failure: 3
+2025-03-16 20:53:18,801 - fetch_market_data - INFO - Saved latest market data to JSON file
+2025-03-16 20:53:18,801 - fetch_market_data - INFO - Fetching benchmark data
+2025-03-16 20:53:18,801 - backend.market_interface - INFO - Market interface initialized with database and rate limiting
+2025-03-16 20:53:18,801 - fetch_market_data - INFO - Earliest portfolio position date: 2024-08-15
+2025-03-16 20:53:18,801 - fetch_market_data - INFO - Fetching benchmark data from 2024-03-16 to 2025-03-16
+2025-03-16 20:53:18,801 - fetch_market_data - INFO - Processing benchmark ^GSPC
+2025-03-16 20:53:18,801 - backend.market_interface - INFO - Adjusted start date from 2024-03-16 to last trading day 2024-03-15
+2025-03-16 20:53:18,801 - backend.market_interface - INFO - Adjusted end date from 2025-03-16 to last trading day 2025-03-14
+2025-03-16 20:53:18,804 - fetch_market_data - INFO - Imputing missing values for benchmark ^GSPC
+2025-03-16 20:53:18,807 - fetch_market_data - INFO - Retrieved 365 historical price points for benchmark ^GSPC
+2025-03-16 20:53:18,887 - backend.database - INFO - Stored 365 data points for ^GSPC (0 errors)
+2025-03-16 20:53:18,887 - fetch_market_data - INFO - Stored historical prices for benchmark ^GSPC
+2025-03-16 20:53:19,893 - fetch_market_data - INFO - Processing benchmark ^IXIC
+2025-03-16 20:53:19,893 - backend.market_interface - INFO - Adjusted start date from 2024-03-16 to last trading day 2024-03-15
+2025-03-16 20:53:19,893 - backend.market_interface - INFO - Adjusted end date from 2025-03-16 to last trading day 2025-03-14
+2025-03-16 20:53:19,902 - fetch_market_data - INFO - Imputing missing values for benchmark ^IXIC
+2025-03-16 20:53:19,905 - fetch_market_data - INFO - Retrieved 365 historical price points for benchmark ^IXIC
+2025-03-16 20:53:20,128 - backend.database - INFO - Stored 365 data points for ^IXIC (0 errors)
+2025-03-16 20:53:20,128 - fetch_market_data - INFO - Stored historical prices for benchmark ^IXIC
+2025-03-16 20:53:21,134 - fetch_market_data - INFO - Processing benchmark ^GDAXI
+2025-03-16 20:53:21,134 - backend.market_interface - INFO - Adjusted start date from 2024-03-16 to last trading day 2024-03-15
+2025-03-16 20:53:21,134 - backend.market_interface - INFO - Adjusted end date from 2025-03-16 to last trading day 2025-03-14
+2025-03-16 20:53:21,142 - fetch_market_data - INFO - Imputing missing values for benchmark ^GDAXI
+2025-03-16 20:53:21,148 - fetch_market_data - INFO - Retrieved 365 historical price points for benchmark ^GDAXI
+2025-03-16 20:53:21,238 - backend.database - INFO - Stored 365 data points for ^GDAXI (0 errors)
+2025-03-16 20:53:21,238 - fetch_market_data - INFO - Stored historical prices for benchmark ^GDAXI
+2025-03-16 20:53:22,243 - fetch_market_data - INFO - Benchmark data fetch complete

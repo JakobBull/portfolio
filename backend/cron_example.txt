@@ -1,0 +1,32 @@
+# Cron Job Examples for fetch_market_data.py
+
+# To edit your crontab, run:
+# crontab -e
+
+# Example 1: Run the script every day at 6:00 PM
+0 18 * * * cd /Users/jakobbull/Documents/Projects/portfolio && /Users/jakobbull/Documents/Projects/portfolio/.venv/bin/python backend/fetch_market_data.py --update-portfolio --report
+
+# Example 2: Run the script every weekday (Monday to Friday) at 5:30 PM
+30 17 * * 1-5 cd /Users/jakobbull/Documents/Projects/portfolio && /Users/jakobbull/Documents/Projects/portfolio/.venv/bin/python backend/fetch_market_data.py --update-portfolio --report
+
+# Example 3: Run the script every Monday at 9:00 AM with 30 days of historical data
+0 9 * * 1 cd /Users/jakobbull/Documents/Projects/portfolio && /Users/jakobbull/Documents/Projects/portfolio/.venv/bin/python backend/fetch_market_data.py --days 30 --update-portfolio --report
+
+# Example 4: Run the script for specific tickers every hour during market hours (9 AM to 4 PM on weekdays)
+0 9-16 * * 1-5 cd /Users/jakobbull/Documents/Projects/portfolio && /Users/jakobbull/Documents/Projects/portfolio/.venv/bin/python backend/fetch_market_data.py --tickers AAPL,MSFT,GOOGL,AMZN
+
+# Example 5: Run a full historical data refresh once a week (Sunday at midnight)
+0 0 * * 0 cd /Users/jakobbull/Documents/Projects/portfolio && /Users/jakobbull/Documents/Projects/portfolio/.venv/bin/python backend/fetch_market_data.py --full-history --update-portfolio --report
+
+# Example 6: Daily update with imputed missing values (for complete historical records)
+0 20 * * * cd /Users/jakobbull/Documents/Projects/portfolio && /Users/jakobbull/Documents/Projects/portfolio/.venv/bin/python backend/fetch_market_data.py --update-portfolio --report --impute-missing
+
+# Example 7: Fetch benchmark data once a week for portfolio comparison
+0 1 * * 0 cd /Users/jakobbull/Documents/Projects/portfolio && /Users/jakobbull/Documents/Projects/portfolio/.venv/bin/python backend/fetch_market_data.py --days 365 --update-portfolio --report
+
+# Notes:
+# 1. Make sure to use absolute paths in cron jobs
+# 2. Make sure the script is executable (chmod +x backend/fetch_market_data.py)
+# 3. If using a virtual environment, specify the full path to the Python executable in the virtual environment
+# 4. Redirect output to a log file if you want to capture the output:
+#    0 18 * * * cd /path/to/portfolio && /path/to/venv/bin/python backend/fetch_market_data.py --update-portfolio --report >> /path/to/portfolio/backend/cron_log.txt 2>&1 
