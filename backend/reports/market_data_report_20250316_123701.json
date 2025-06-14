@@ -1,0 +1,139 @@
+{
+  "generated_at": "2025-03-16T12:37:01.205319",
+  "portfolio": {
+    "total_value": 42905.0,
+    "total_cost": 34090.59014557252,
+    "total_pl": 8814.409854427484,
+    "total_return_pct": 25.855844139947358,
+    "positions": [
+      {
+        "ticker": "AAPL",
+        "name": null,
+        "amount": 15.0,
+        "purchase_price": 115.98904651006063,
+        "purchase_currency": "USD",
+        "purchase_date": "2025-03-15",
+        "cost_basis": 1745.9498862992923,
+        "current_price": 175.0,
+        "price_date": "last_known",
+        "price_change": -25.580001831054688,
+        "price_change_pct": -10.699795477215151,
+        "current_value": 2625.0,
+        "value_currency": "USD",
+        "value_date": "2025-03-16",
+        "unrealized_pl": 879.0501137007077,
+        "return_percentage": 50.3479578995213
+      },
+      {
+        "ticker": "MSFT",
+        "name": null,
+        "amount": 35.0,
+        "purchase_price": 228.68102209908622,
+        "purchase_currency": "USD",
+        "purchase_date": "2025-03-15",
+        "cost_basis": 8011.289609241486,
+        "current_price": 300.0,
+        "price_date": "last_known",
+        "price_change": -4.75,
+        "price_change_pct": -1.2076987692875425,
+        "current_value": 10500.0,
+        "value_currency": "USD",
+        "value_date": "2025-03-16",
+        "unrealized_pl": 2488.710390758514,
+        "return_percentage": 31.06504086292977
+      },
+      {
+        "ticker": "GOOGL",
+        "name": null,
+        "amount": 2.0,
+        "purchase_price": 136.0,
+        "purchase_currency": "USD",
+        "purchase_date": "2022-03-05",
+        "cost_basis": 277.272,
+        "current_price": 140.0,
+        "price_date": "last_known",
+        "price_change": -8.169998168945312,
+        "price_change_pct": -4.7045940323954465,
+        "current_value": 280.0,
+        "value_currency": "USD",
+        "value_date": "2025-03-16",
+        "unrealized_pl": 2.7280000000000086,
+        "return_percentage": 0.9838714331054014
+      },
+      {
+        "ticker": "AMZN",
+        "name": null,
+        "amount": 3.0,
+        "purchase_price": 144.0,
+        "purchase_currency": "USD",
+        "purchase_date": "2022-04-20",
+        "cost_basis": 437.432,
+        "current_price": 150.0,
+        "price_date": "last_known",
+        "price_change": -1.3000030517578125,
+        "price_change_pct": -0.6524482066538582,
+        "current_value": 450.0,
+        "value_currency": "USD",
+        "value_date": "2025-03-16",
+        "unrealized_pl": 12.567999999999984,
+        "return_percentage": 2.873132281131692
+      },
+      {
+        "ticker": "TSLA",
+        "name": null,
+        "amount": 96.0,
+        "purchase_price": 245.72769594440857,
+        "purchase_currency": "USD",
+        "purchase_date": "2025-03-15",
+        "cost_basis": 23601.634650031738,
+        "current_price": 300.0,
+        "price_date": "last_known",
+        "price_change": -12.690017700195312,
+        "price_change_pct": -4.831163456610772,
+        "current_value": 28800.0,
+        "value_currency": "USD",
+        "value_date": "2025-03-16",
+        "unrealized_pl": 5198.365349968262,
+        "return_percentage": 22.02544623306959
+      },
+      {
+        "ticker": "ASC.L",
+        "name": null,
+        "amount": 1.0,
+        "purchase_price": 12.0,
+        "purchase_currency": "EUR",
+        "purchase_date": "2025-03-15",
+        "cost_basis": 17.012,
+        "current_price": 250.0,
+        "price_date": "last_known",
+        "price_change": -38.600006103515625,
+        "price_change_pct": -13.374915206921548,
+        "current_value": 250.0,
+        "value_currency": "EUR",
+        "value_date": "2025-03-16",
+        "unrealized_pl": 232.988,
+        "return_percentage": 1369.5509052433574
+      }
+    ]
+  },
+  "watchlist": {
+    "items": [
+      {
+        "ticker": "NFLX",
+        "name": null,
+        "sector": null,
+        "strike_price": 500.0,
+        "date_added": "2025-03-15",
+        "notes": "Potential buy if drops below $500"
+      },
+      {
+        "ticker": "NVDA",
+        "name": null,
+        "sector": null,
+        "strike_price": 700.0,
+        "date_added": "2025-03-15",
+        "notes": "Watching for entry point"
+      }
+    ]
+  }
+}
