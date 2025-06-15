@@ -1,120 +1,85 @@
 import pytest
-import os
-import datetime
-import pandas as pd
-import tempfile
-from backend.database import DatabaseManager
+from datetime import date
+from backend.database import DatabaseManager, Stock, Position, Transaction, Watchlist, TransactionType
 
-@pytest.fixture
-def temp_db_path():
-    """Create a temporary database file path"""
-    fd, path = tempfile.mkstemp(suffix='.db')
-    os.close(fd)
-    yield path
-    # Clean up after test
-    if os.path.exists(path):
-        os.unlink(path)
+def test_add_and_get_stock(test_db: DatabaseManager):
+    """Test adding and retrieving a stock."""
+    stock = test_db.add_stock("AAPL", "Apple Inc.", "USD")
+    assert stock is not None
+    retrieved_stock = test_db.get_stock(stock.ticker)
+    assert retrieved_stock is not None
+    assert retrieved_stock.ticker == "AAPL"
+    assert retrieved_stock.name == "Apple Inc."
 
-@pytest.fixture
-def test_db(temp_db_path):
-    """Create a test database instance"""
-    db_url = f"sqlite:///{temp_db_path}"
-    # Create a database manager
-    db_manager = DatabaseManager(db_url)
-    
-    # Create all tables in the database
-    from backend.database import Base
-    from sqlalchemy import create_engine
-    engine = create_engine(db_url)
-    Base.metadata.create_all(bind=engine)
-    
-    return db_manager
+def test_add_and_get_stock_price(test_db: DatabaseManager):
+    """Test adding and retrieving a stock price."""
+    stock = test_db.add_stock("GOOG", "Alphabet Inc.", "USD")
+    assert stock is not None
 
-@pytest.fixture
-def sample_date():
-    """Sample date for testing"""
-    return datetime.date(2023, 1, 15)
+    price_date = date(2023, 1, 1)
+    stock_price = test_db.add_stock_price(stock.ticker, price_date, 150.0)
+    assert stock_price is not None
+    assert stock_price.price == 150.0
 
-@pytest.fixture
-def sample_df():
-    """Sample DataFrame for testing historical prices"""
-    dates = pd.date_range(start='2023-01-01', end='2023-01-10')
-    prices = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0]
-    return pd.DataFrame({'price': prices}, index=dates)
+    retrieved_price = test_db.get_stock_price(stock.ticker, price_date)
+    assert retrieved_price is not None
+    assert retrieved_price.price == 150.0
 
-class TestDatabaseManager:
-    """Test the DatabaseManager class"""
+def test_add_and_get_position(test_db: DatabaseManager):
+    """Test adding and retrieving a position."""
+    stock = test_db.add_stock("TSLA", "Tesla, Inc.", "USD")
+    assert stock is not None
+
+    position = test_db.add_position(stock.ticker, 10, 200.0, "USD", date(2023, 1, 1))
+    assert position is not None
+    assert position.amount == 10
+
+    positions = test_db.get_all_positions()
+    assert len(positions) == 1
+    assert positions[0].stock.ticker == "TSLA"
+
+def test_add_and_get_transaction(test_db: DatabaseManager):
+    """Test adding and retrieving a transaction."""
+    stock = test_db.add_stock("MSFT", "Microsoft", "USD")
+    assert stock is not None
+    position = test_db.add_position(stock.ticker, 5, 300.0, "USD", date(2023, 1, 1))
+    assert position is not None
+
+    transaction = test_db.add_transaction(
+        transaction_type=TransactionType.BUY,
+        ticker=stock.ticker,
+        amount=5,
+        price=310.0,
+        currency="USD",
+        transaction_date=date(2023, 1, 2)
+    )
+    assert transaction is not None
+    assert transaction.type == TransactionType.BUY
+
+    transactions = test_db.get_all_transactions()
+    assert len(transactions) == 1
+    assert transactions[0].price == 310.0
+
+def test_add_and_get_watchlist_item(test_db: DatabaseManager):
+    """Test adding and retrieving a watchlist item."""
+    stock = test_db.add_stock("NVDA", "NVIDIA", "USD")
+    assert stock is not None
     
-    def test_initialization(self, test_db, temp_db_path):
-        """Test database initialization"""
-        assert os.path.exists(temp_db_path)
-        assert test_db.engine is not None
-    
-    def test_store_and_get_exchange_rate(self, test_db, sample_date):
-        """Test storing and retrieving exchange rates"""
-        # Store exchange rate
-        result = test_db.store_exchange_rate('USD', 'EUR', sample_date, 0.85)
-        assert result is True
-        
-        # Retrieve exchange rate
-        rate = test_db.get_exchange_rate('USD', 'EUR', sample_date)
-        assert rate == 0.85
-        
-        # Test non-existent rate
-        rate = test_db.get_exchange_rate('USD', 'JPY', sample_date)
-        assert rate is None
-    
-    def test_store_and_get_stock_price(self, test_db, sample_date):
-        """Test storing and retrieving stock prices"""
-        # Store stock price
-        result = test_db.store_stock_price('AAPL', sample_date, 150.0)
-        assert result is True
-        
-        # Retrieve stock price
-        price = test_db.get_stock_price('AAPL', sample_date)
-        assert price == 150.0
-        
-        # Test non-existent price
-        price = test_db.get_stock_price('MSFT', sample_date)
-        assert price is None
-    
-    def test_store_and_get_historical_prices(self, test_db, sample_df):
-        """Test storing and retrieving historical prices"""
-        start_date = datetime.date(2023, 1, 1)
-        end_date = datetime.date(2023, 1, 10)
-        
-        # Store historical prices
-        result = test_db.store_historical_prices('AAPL', start_date, end_date, sample_df)
-        assert result is True
-        
-        # Retrieve historical prices
-        df = test_db.get_historical_prices('AAPL', start_date, end_date)
-        assert df is not None
-        assert 'price' in df.columns
-        assert len(df) == len(sample_df)
-        assert df['price'].iloc[0] == sample_df['price'].iloc[0]
-        
-        # Test non-existent historical prices
-        df = test_db.get_historical_prices('MSFT', start_date, end_date)
-        assert df is None
-    
-    def test_log_api_request(self, test_db):
-        """Test logging API requests"""
-        # Log successful request
-        result = test_db.log_api_request('exchange_rate', True)
-        assert result is True
-        
-        # Log failed request
-        result = test_db.log_api_request('stock_price', False, 'API error')
-        assert result is True
-    
-    def test_get_recent_api_requests(self, test_db):
-        """Test getting recent API requests"""
-        # Log some requests
-        test_db.log_api_request('exchange_rate', True)
-        test_db.log_api_request('stock_price', True)
-        test_db.log_api_request('historical_prices', False, 'API error')
-        
-        # Get recent requests
-        count = test_db.get_recent_api_requests(minutes=60)
-        assert count == 3 
+    item = test_db.add_watchlist_item(stock.ticker)
+    assert item is not None
+
+    watchlist = test_db.get_all_watchlist_items()
+    assert len(watchlist) == 1
+    assert watchlist[0].stock.ticker == "NVDA"
+
+def test_get_tickers_to_track(test_db: DatabaseManager):
+    """Test retrieving unique tickers from positions and watchlist."""
+    stock1 = test_db.add_stock("AMZN", "Amazon", "USD")
+    stock2 = test_db.add_stock("META", "Meta", "USD")
+    assert stock1 is not None and stock2 is not None
+
+    test_db.add_position(stock1.ticker, 2, 130.0, "USD", date(2023, 1, 1))
+    test_db.add_watchlist_item(stock2.ticker)
+
+    tickers = test_db.get_tickers_to_track()
+    assert set(tickers) == {"AMZN", "META"} 

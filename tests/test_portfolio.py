@@ -1,285 +1,65 @@
 import pytest
-from datetime import date
-# Replace unittest.mock with pytest's mocker fixture
-# from unittest import mock
-
+from datetime import date, timedelta
+from unittest.mock import MagicMock
 from backend.portfolio import Portfolio
-from backend.position import Position
-from backend.transaction import Transaction, Dividend
-from backend.stock import Stock
-from backend.money_amount import MoneyAmount
+from backend.database import Stock, Position, Transaction, TransactionType
 
 @pytest.fixture
-def mock_stock(mocker):
-    """Create a mock Stock object for testing"""
-    stock = mocker.Mock(spec=Stock)
-    stock.ticker = "AAPL"
-    stock.get_price.return_value = 150.0
-    return stock
+def sample_stock():
+    """Fixture for a sample stock."""
+    return Stock(ticker="AAPL", name="Apple", currency="USD", sector="Technology", prices=[])
 
 @pytest.fixture
-def transaction_date():
-    """Create a sample transaction date"""
-    return date(2023, 1, 15)
+def sample_portfolio(sample_stock):
+    """Fixture for a sample portfolio."""
+    positions = [
+        Position(stock=sample_stock, amount=10, purchase_price=150.0, purchase_date=date(2023, 1, 1), purchase_currency="USD")
+    ]
+    transactions = [
+        Transaction(stock=sample_stock, amount=10, price=150.0, date=date(2023, 1, 1), currency="USD", type=TransactionType.BUY)
+    ]
+    return Portfolio(positions, transactions)
 
-@pytest.fixture
-def portfolio():
-    """Create a portfolio for testing"""
-    return Portfolio()
+def test_get_position(sample_portfolio: Portfolio):
+    """Test retrieving a position from the portfolio."""
+    position = sample_portfolio.get_position("AAPL")
+    assert position is not None
+    assert position.stock.ticker == "AAPL"
 
-class TestPortfolio:
-    """Test cases for the Portfolio class"""
+    assert sample_portfolio.get_position("GOOG") is None
+
+def test_get_transaction_history(sample_portfolio: Portfolio):
+    """Test retrieving transaction history."""
+    history = sample_portfolio.get_transaction_history()
+    assert len(history) == 1
+
+    ticker_history = sample_portfolio.get_transaction_history(transaction_type="buy")
+    assert len(ticker_history) == 1
+    assert ticker_history[0].price == 150.0
     
-    def test_portfolio_initialization(self, portfolio):
-        """Test that portfolios are initialized correctly"""
-        assert len(portfolio.positions) == 0
-        assert len(portfolio.transactions) == 0
-        assert len(portfolio.dividends) == 0
+    empty_history = sample_portfolio.get_transaction_history(transaction_type="sell")
+    assert len(empty_history) == 0
+
+def test_get_total_value(sample_portfolio: Portfolio):
+    """Test calculating the total value of the portfolio."""
+    # Add a mock price to the stock for value calculation
+    sample_portfolio.positions[0].stock.prices.append(MagicMock(close_price=200.0))
     
-    def test_transaction_buy(self, portfolio, mock_stock, transaction_date):
-        """Test adding a buy transaction"""
-        # Create a buy transaction
-        transaction = Transaction(
-            "buy", 
-            mock_stock, 
-            10, 
-            150.0, 
-            "USD", 
-            transaction_date
-        )
-        
-        # Add transaction to portfolio
-        result = portfolio.update_position(transaction)
-        portfolio.transactions.append(transaction)
-        
-        # Check result
-        assert result is True
-        assert len(portfolio.positions) == 1
-        assert len(portfolio.transactions) == 1
-        assert "AAPL" in portfolio.positions
-        assert portfolio.positions["AAPL"].amount == 10
-    
-    def test_transaction_sell(self, portfolio, mock_stock, transaction_date, monkeypatch):
-        """Test adding a sell transaction"""
-        # First add a buy transaction
-        buy_transaction = Transaction(
-            "buy", 
-            mock_stock, 
-            10, 
-            150.0, 
-            "USD", 
-            transaction_date
-        )
-        portfolio.update_position(buy_transaction)
-        portfolio.transactions.append(buy_transaction)
-        
-        # Mock the Position.update method to avoid the ticker attribute error
-        original_update = Position.update
-        def mock_update(self, transaction):
-            if transaction.type == "sell":
-                self.amount -= transaction.amount
-            return None
-        
-        monkeypatch.setattr(Position, 'update', mock_update)
-        
-        # Then add a sell transaction
-        sell_transaction = Transaction(
-            "sell", 
-            mock_stock, 
-            5, 
-            160.0, 
-            "USD", 
-            transaction_date
-        )
-        result = portfolio.update_position(sell_transaction)
-        portfolio.transactions.append(sell_transaction)
-        
-        # Check result
-        assert result is True
-        assert len(portfolio.positions) == 1
-        assert len(portfolio.transactions) == 2
-        assert "AAPL" in portfolio.positions
-        assert portfolio.positions["AAPL"].amount == 5
-    
-    def test_transaction_sell_all(self, portfolio, mock_stock, transaction_date, monkeypatch):
-        """Test selling all shares"""
-        # First add a buy transaction
-        buy_transaction = Transaction(
-            "buy", 
-            mock_stock, 
-            10, 
-            150.0, 
-            "USD", 
-            transaction_date
-        )
-        portfolio.update_position(buy_transaction)
-        portfolio.transactions.append(buy_transaction)
-        
-        # Mock the Position.update method to avoid the ticker attribute error
-        original_update = Position.update
-        def mock_update(self, transaction):
-            if transaction.type == "sell":
-                self.amount -= transaction.amount
-            return None
-        
-        monkeypatch.setattr(Position, 'update', mock_update)
-        
-        # Then sell all shares
-        sell_transaction = Transaction(
-            "sell", 
-            mock_stock, 
-            10, 
-            160.0, 
-            "USD", 
-            transaction_date
-        )
-        result = portfolio.update_position(sell_transaction)
-        portfolio.transactions.append(sell_transaction)
-        
-        # Check result
-        assert result is True
-        assert len(portfolio.positions) == 0  # Position should be removed
-        assert len(portfolio.transactions) == 2
-    
-    def test_transaction_sell_without_position(self, portfolio, mock_stock, transaction_date):
-        """Test selling without a position"""
-        # Try to sell without a position
-        sell_transaction = Transaction(
-            "sell", 
-            mock_stock, 
-            5, 
-            160.0, 
-            "USD", 
-            transaction_date
-        )
-        result = portfolio.update_position(sell_transaction)
-        
-        # Check result
-        assert result is False
-        assert len(portfolio.positions) == 0
-    
-    def test_add_dividend(self, portfolio, mock_stock, transaction_date):
-        """Test adding a dividend"""
-        # Add a dividend
-        dividend = Dividend(
-            mock_stock, 
-            10, 
-            0.5, 
-            "USD", 
-            transaction_date
-        )
-        
-        # Add dividend to portfolio
-        result = portfolio.update_position(dividend)
-        portfolio.dividends.append(dividend)
-        portfolio.transactions.append(dividend)
-        
-        # Check result
-        assert result is True
-        assert len(portfolio.positions) == 0  # Dividends don't create positions
-        assert len(portfolio.dividends) == 1
-        assert len(portfolio.transactions) == 1
-    
-    def test_get_value(self, portfolio, mocker):
-        """Test portfolio value calculation"""
-        # Create mock positions
-        position1 = mocker.Mock(spec=Position)
-        position1.get_value.return_value = 1000.0
-        
-        position2 = mocker.Mock(spec=Position)
-        position2.get_value.return_value = 2000.0
-        
-        # Add positions to portfolio
-        portfolio.positions = {
-            "AAPL": position1,
-            "MSFT": position2
-        }
-        
-        # Test portfolio value
-        portfolio_value = portfolio.get_value("USD")
-        assert portfolio_value == 3000.0  # 1000 + 2000
-        
-        # Verify the positions' get_value methods were called
-        assert position1.get_value.called
-        assert position2.get_value.called
-    
-    def test_get_gross_purchase_price(self, portfolio, mocker):
-        """Test gross purchase price calculation"""
-        # Create mock positions
-        position1 = mocker.Mock(spec=Position)
-        position1.get_cost_basis.return_value = 900.0
-        
-        position2 = mocker.Mock(spec=Position)
-        position2.get_cost_basis.return_value = 1800.0
-        
-        # Add positions to portfolio
-        portfolio.positions = {
-            "AAPL": position1,
-            "MSFT": position2
-        }
-        
-        # Test gross purchase price
-        gross_price = portfolio.get_gross_purchase_price("USD")
-        assert gross_price == 2700.0  # 900 + 1800
-    
-    def test_get_net_purchase_price(self, portfolio, transaction_date, mocker):
-        """Test net purchase price calculation"""
-        # Create mock positions and money amounts
-        position1 = mocker.Mock(spec=Position)
-        position1.amount = 10
-        money_amount1 = mocker.Mock(spec=MoneyAmount)
-        money_amount1.get_money_amount.return_value = 90.0
-        position1.purchase_price_net = money_amount1
-        
-        position2 = mocker.Mock(spec=Position)
-        position2.amount = 5
-        money_amount2 = mocker.Mock(spec=MoneyAmount)
-        money_amount2.get_money_amount.return_value = 180.0
-        position2.purchase_price_net = money_amount2
-        
-        # Add positions to portfolio
-        portfolio.positions = {
-            "AAPL": position1,
-            "MSFT": position2
-        }
-        
-        # Test net purchase price
-        net_price = portfolio.get_net_purchase_price("USD")
-        assert net_price == 1800.0  # (10 * 90) + (5 * 180)
-    
-    def test_get_unrealized_pl(self, portfolio, monkeypatch):
-        """Test unrealized profit/loss calculation"""
-        # Mock the portfolio's get_value and get_gross_purchase_price methods
-        monkeypatch.setattr(portfolio, 'get_value', lambda currency, date=None: 3000.0)
-        monkeypatch.setattr(portfolio, 'get_gross_purchase_price', lambda currency: 2700.0)
-        
-        # Test unrealized P/L
-        unrealized_pl = portfolio.get_unrealized_pl("USD")
-        assert unrealized_pl == 300.0  # 3000 - 2700
-    
-    def test_get_dividend_income(self, portfolio, mocker):
-        """Test dividend income calculation"""
-        # Create mock dividends
-        dividend1 = mocker.Mock(spec=Dividend)
-        dividend1.get_transaction_value.return_value = 50.0
-        
-        dividend2 = mocker.Mock(spec=Dividend)
-        dividend2.get_transaction_value.return_value = 30.0
-        
-        # Add dividends to portfolio
-        portfolio.dividends = [dividend1, dividend2]
-        
-        # Test dividend income
-        dividend_income = portfolio.get_dividend_income("USD")
-        assert dividend_income == 80.0  # 50 + 30
-    
-    def test_get_dividend_yield(self, portfolio, monkeypatch):
-        """Test dividend yield calculation"""
-        # Mock the portfolio's get_dividend_income and get_value methods
-        monkeypatch.setattr(portfolio, 'get_dividend_income', 
-                           lambda currency, start_date=None, end_date=None: 80.0)
-        monkeypatch.setattr(portfolio, 'get_value', lambda currency, date=None: 2000.0)
-        
-        # Test dividend yield
-        dividend_yield = portfolio.get_dividend_yield("USD")
-        assert dividend_yield == 0.04  # 80 / 2000 (now returned as decimal)
+    value = sample_portfolio.get_total_value()
+    assert value == 2000.0 # 10 shares * $200
+
+def test_get_performance(sample_portfolio: Portfolio):
+    """Test calculating portfolio performance."""
+    # Mock initial and final values for performance calculation
+    # This is a simplification; a real test would involve more complex setup
+    # to simulate price changes over time.
+    initial_value = 1500.0  # 10 * 150
+    final_value = 2000.0    # 10 * 200
+
+    # We can't easily test the date-based values without more complex mocking,
+    # so we focus on the logic with assumed values.
+    sample_portfolio.get_total_value = MagicMock(side_effect=[initial_value, final_value])
+    performance = sample_portfolio.get_performance(start_date=date.today() - timedelta(days=1), end_date=date.today())
+
+    assert performance["absolute_return"] == 500.0
+    assert performance["percentage_return"] == pytest.approx(33.333, abs=1e-3)

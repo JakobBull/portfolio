@@ -11,11 +11,77 @@ A comprehensive portfolio management system with tax calculations, dividend trac
 - **Interactive Dashboard**: Visualize portfolio data and performance
 - **Enhanced Market Interface**: Robust API handling with rate limiting and persistent caching
 
+## Backend Architecture
+
+The backend is built using Python with SQLAlchemy for database management. Here's an overview of the key components:
+
+### Database Models
+
+- **Stock**: Stores basic stock information (ticker, name, currency)
+- **StockPrice**: Historical price data for stocks
+- **Position**: Portfolio positions with purchase details
+- **Transaction**: Buy/sell/dividend transactions
+- **Watchlist**: Stocks to watch with target prices
+
+### Core Components
+
+1. **Database Manager**
+   - Handles all database operations
+   - Uses SQLAlchemy ORM for data access
+   - Provides CRUD operations for all models
+   - Manages database sessions and transactions
+
+2. **Portfolio Manager**
+   - Tracks positions and transactions
+   - Calculates portfolio value and performance
+   - Handles position updates and cost basis tracking
+
+3. **Market Interface**
+   - Fetches stock prices and market data
+   - Implements rate limiting for API calls
+   - Caches data for offline access
+   - Handles currency conversions
+
+4. **Tax Calculator**
+   - Implements German tax rules
+   - Calculates capital gains tax
+   - Handles dividend taxation
+   - Supports partial exemption for funds
+
+5. **Benchmark Comparison**
+   - Compares portfolio performance against indices
+   - Supports custom benchmarks
+   - Calculates relative performance metrics
+
+### Key Features
+
+1. **Data Persistence**
+   - SQLite database for local storage
+   - Automatic schema management
+   - Transaction support for data integrity
+
+2. **Error Handling**
+   - Graceful error recovery
+   - Detailed error logging
+   - Transaction rollback on failure
+
+3. **Performance Optimization**
+   - Efficient database queries
+   - Connection pooling
+   - Caching of frequently accessed data
+
+4. **Extensibility**
+   - Modular design for easy extension
+   - Clear separation of concerns
+   - Well-defined interfaces
+
 ## Getting Started
 
 ### Prerequisites
 
-- Docker and Docker Compose
+- Python 3.8+
+- SQLite 3
+- Required Python packages (see requirements.txt)
 
 ### Installation
 
@@ -25,196 +91,53 @@ A comprehensive portfolio management system with tax calculations, dividend trac
    cd portfolio-manager
    ```
 
-2. Build and start the Docker container:
+2. Create a virtual environment:
    ```
-   docker-compose up -d
-   ```
-
-3. Access the dashboard at http://localhost:8050
-
-## Usage
-
-### Portfolio Summary
-
-The dashboard provides a comprehensive overview of your portfolio, including:
-- Total value
-- Unrealized profit/loss
-- Dividend yield
-- Total cost
-- Return percentage
-- Dividend income
-
-### Performance Tracking
-
-Compare your portfolio performance against major benchmarks:
-- NASDAQ Composite
-- S&P 500
-- DAX 30
-
-Adjust the date range to view performance over different periods.
-
-### Position Management
-
-View detailed information about each position in your portfolio:
-- Market value
-- Cost basis
-- Unrealized profit/loss
-- Return percentage
-- Weight in portfolio
-- Dividend yield
-- Sector
-
-### Adding Transactions
-
-Add new transactions to your portfolio:
-1. Search for a stock by ticker or name
-2. Select the transaction type (buy, sell, dividend)
-3. Enter the number of shares and price per share
-4. Select the currency and date
-5. Click "Add Transaction"
-
-### Tax Settings
-
-Configure tax settings for German tax calculations:
-- Married (joint filing)
-- Church tax
-- Partial exemption for funds
-
-## Testing
-
-The application includes a comprehensive test suite using pytest to ensure all components work correctly.
-
-### Running Tests
-
-You can run the tests in several ways:
-
-1. **Using the test runner script**:
-   ```
-   python run_tests.py
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
-2. **Using pytest directly**:
+3. Install dependencies:
    ```
-   pytest tests/
-   ```
-
-3. **Using Docker Compose**:
-   ```
-   docker-compose run test
+   pip install -r requirements.txt
    ```
 
-4. **Running specific tests**:
+4. Initialize the database:
    ```
-   pytest tests/test_transaction.py
+   python backend/migrate_db.py
    ```
-
-5. **Running tests with coverage**:
-   ```
-   pytest --cov=backend tests/
-   ```
-
-### Test Coverage
-
-The test suite covers:
-- Transaction and Dividend classes
-- Position class
-- Portfolio class
-- Controller class
-- MoneyAmount class
-- Dash application
-
-### Adding New Tests
-
-To add new tests:
-1. Create a new test file in the `tests` directory
-2. Follow the naming convention `test_*.py`
-3. Use pytest fixtures for test setup
-4. Run the tests to ensure they pass
-
-## Docker Deployment
-
-The application is containerized using Docker for easy deployment:
-
-```
-# Build the Docker image
-docker build -t portfolio-manager .
-
-# Run the container
-docker run -p 8050:8050 portfolio-manager
-```
-
-Or use Docker Compose:
-
-```
-docker-compose up -d
-```
-
-## Architecture
-
-The system consists of several components:
-
-- **Portfolio**: Manages positions and transactions
-- **Position**: Tracks holdings in specific stocks
-- **Transaction**: Represents buy, sell, and dividend transactions
-- **Controller**: Coordinates between components and provides analysis
-- **Tax Calculator**: Implements German tax rules
-- **Benchmark**: Compares portfolio performance against indices
-- **Market Interface**: Provides robust access to market data with fallbacks and caching
-- **Database**: Stores market data for offline access and reduced API calls
-- **Rate Limiter**: Ensures API rate limits are respected
-- **Dashboard**: Provides interactive visualization and management
-
-## Market Interface
-
-The enhanced market interface provides robust access to market data with the following features:
-
-### Persistent Caching
-
-- SQLite database for storing exchange rates, stock prices, and historical data
-- Reduces API calls and provides offline access to previously fetched data
-- Automatic fallback to cached data when API calls fail
-
-### Rate Limiting
-
-- Token bucket algorithm to respect API rate limits
-- Configurable limits for requests per hour and burst requests
-- Queuing system for handling requests when limits are reached
-
-### Error Handling
-
-- Multiple fallback mechanisms when API calls fail
-- Default exchange rates for common currency pairs
-- Automatic retries with exponential backoff
-- Logging of API errors for troubleshooting
-
-### Parallel Processing
-
-- Thread pool for prefetching data for multiple tickers
-- Efficient batch processing of historical data
 
 ### Usage
 
-```python
-from backend.market_interface import MarketInterface
+1. Start the backend server:
+   ```
+   python backend/server.py
+   ```
 
-# Initialize the market interface
-market = MarketInterface()
+2. Access the dashboard at http://localhost:8050
 
-# Get current stock price
-price = market.get_price('AAPL', datetime.date.today())
+## Testing
 
-# Get historical prices
-historical = market.get_historical_prices('MSFT', 
-                                        start_date=datetime.date(2023, 1, 1),
-                                        end_date=datetime.date(2023, 12, 31))
+The application includes a comprehensive test suite using pytest. Run the tests with:
 
-# Convert currency
-eur_amount = market.convert_currency(100.0, 'USD', 'EUR')
-
-# Prefetch data for multiple tickers
-market.prefetch_data(['AAPL', 'MSFT', 'GOOG'], 
-                    start_date=datetime.date(2023, 1, 1))
 ```
+pytest tests/
+```
+
+Key test areas:
+- Database operations
+- Portfolio management
+- Market data handling
+- Tax calculations
+- Benchmark comparisons
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 

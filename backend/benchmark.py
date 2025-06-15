@@ -2,22 +2,37 @@ import datetime
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Union
-from backend.market_interface import MarketInterface
+from backend.database import DatabaseManager
 
 class Benchmark:
     """Base class for benchmarks to compare portfolio performance"""
     
-    def __init__(self, name: str, ticker: str):
+    def __init__(self, name: str, ticker: str, db_manager: DatabaseManager):
         """Initialize benchmark with name and ticker
         
         Args:
             name: Human-readable name of the benchmark
             ticker: Yahoo Finance ticker symbol
+            db_manager: The database manager instance.
         """
         self.name = name
         self.ticker = ticker
-        self._market_interface = MarketInterface()
+        self.db_manager = db_manager
+        self._ensure_stock_in_db()
         
+    def _ensure_stock_in_db(self):
+        """Ensures the benchmark's ticker exists in the stocks table."""
+        stock = self.db_manager.get_stock(self.ticker)
+        if not stock:
+            # Benchmarks might not have a standard currency, sector, or country
+            self.db_manager.add_stock(
+                ticker=self.ticker,
+                name=self.name,
+                currency='N/A',
+                sector='Benchmark',
+                country='N/A'
+            )
+
     def get_returns(self, start_date: datetime.date, end_date: datetime.date = None,
                    interval: str = 'daily') -> pd.DataFrame:
         """Get benchmark returns over a period
@@ -33,14 +48,19 @@ class Benchmark:
         if end_date is None:
             end_date = datetime.date.today()
             
-        # Get historical prices
-        prices = self._market_interface.get_historical_prices(
+        # Get historical prices from the database
+        price_data = self.db_manager.get_historical_stock_prices(
             self.ticker, start_date, end_date
         )
         
-        if prices.empty:
+        if not price_data:
             return pd.DataFrame(columns=['date', 'price', 'return'])
             
+        dates = [p.date for p in price_data]
+        prices_values = [p.price for p in price_data]
+        prices = pd.DataFrame({'price': prices_values}, index=pd.to_datetime(dates))
+        prices.index.name = 'date'
+
         # Calculate returns
         prices['return'] = prices['price'].pct_change()
         
@@ -106,40 +126,42 @@ class Benchmark:
 class NasdaqBenchmark(Benchmark):
     """NASDAQ Composite Index benchmark"""
     
-    def __init__(self):
-        super().__init__("NASDAQ Composite", "^IXIC")
+    def __init__(self, db_manager: DatabaseManager):
+        super().__init__("NASDAQ Composite", "^IXIC", db_manager)
 
 
 class SP500Benchmark(Benchmark):
     """S&P 500 Index benchmark"""
     
-    def __init__(self):
-        super().__init__("S&P 500", "^GSPC")
+    def __init__(self, db_manager: DatabaseManager):
+        super().__init__("S&P 500", "^GSPC", db_manager)
 
 
 class DAX30Benchmark(Benchmark):
     """DAX 30 Index benchmark"""
     
-    def __init__(self):
-        super().__init__("DAX 30", "^GDAXI")
+    def __init__(self, db_manager: DatabaseManager):
+        super().__init__("DAX 30", "^GDAXI", db_manager)
 
 
 class BenchmarkComparison:
     """Class to compare portfolio performance against benchmarks"""
     
-    def __init__(self, portfolio_returns: pd.DataFrame):
+    def __init__(self, portfolio_returns: pd.DataFrame, db_manager: DatabaseManager):
         """Initialize with portfolio returns
         
         Args:
             portfolio_returns: DataFrame with dates and portfolio returns
+            db_manager: An instance of DatabaseManager
         """
         self.portfolio_returns = portfolio_returns
         self.benchmarks = {}
+        self.db_manager = db_manager
         
         # Add default benchmarks
-        self.add_benchmark(NasdaqBenchmark())
-        self.add_benchmark(SP500Benchmark())
-        self.add_benchmark(DAX30Benchmark())
+        self.add_benchmark(NasdaqBenchmark(db_manager))
+        self.add_benchmark(SP500Benchmark(db_manager))
+        self.add_benchmark(DAX30Benchmark(db_manager))
         
     def add_benchmark(self, benchmark: Benchmark):
         """Add a benchmark for comparison"""
@@ -147,7 +169,7 @@ class BenchmarkComparison:
         
     def add_custom_benchmark(self, name: str, ticker: str):
         """Add a custom benchmark by ticker"""
-        self.add_benchmark(Benchmark(name, ticker))
+        self.add_benchmark(Benchmark(name, ticker, self.db_manager))
         
     def get_comparison(self, start_date: datetime.date, 
                       end_date: datetime.date = None) -> pd.DataFrame:

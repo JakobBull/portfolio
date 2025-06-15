@@ -1,24 +1,83 @@
-from backend.transaction import Transaction, Dividend
-from backend.position import Position
 from backend.money_amount import MoneyAmount
-from datetime import date
-from typing import List, Dict, Optional, Union, cast
+from datetime import date, timedelta
+from typing import List, Dict, Optional, Union, cast, Any
 import logging
 import pandas as pd
-from backend.stock import Stock
+from backend.database import Stock, Transaction, TransactionType, Dividend
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class Portfolio:
-    """Class representing a portfolio of stock positions"""
+    """Represents a portfolio based on transactions."""
 
-    def __init__(self) -> None:
-        """Initialize an empty portfolio"""
-        self.positions: Dict[str, Position] = {}
-        self.transactions: List[Transaction] = []
-        self.dividends: List[Dividend] = []  # Track dividend transactions separately
+    def __init__(self, positions: list, transactions: list[Transaction]):
+        """Initializes the portfolio with transactions."""
+        # positions parameter is kept for backward compatibility but ignored
+        self.transactions = transactions
+        self.dividends: list[Dividend] = [
+            t for t in transactions if isinstance(t, Dividend) or t.type == TransactionType.DIVIDEND
+        ]
+
+    def get_positions(self) -> dict[str, float]:
+        """Get current positions calculated from transactions."""
+        from backend.database import db_manager
+        return db_manager.get_portfolio_positions_at_date(date.today())
+
+    def get_total_value(self, value_date: date | None = None) -> float:
+        """Calculates the total value of the portfolio on a given date."""
+        from backend.database import db_manager
+        if value_date is None:
+            value_date = date.today()
+        return db_manager.get_portfolio_value_at_date(value_date)
+
+    def get_performance(self, start_date: date, end_date: date | None = None) -> dict[str, float]:
+        """Calculates portfolio performance over a period."""
+        end_date = end_date or date.today()
+        initial_value = self.get_total_value(start_date)
+        final_value = self.get_total_value(end_date)
+
+        if initial_value == 0:
+            return {"absolute_return": 0, "percentage_return": 0}
+
+        absolute_return = final_value - initial_value
+        percentage_return = (absolute_return / initial_value) * 100
+        return {
+            "absolute_return": absolute_return,
+            "percentage_return": percentage_return,
+        }
+
+    def get_position_breakdown(self) -> dict[str, float]:
+        """Returns a breakdown of portfolio value by position."""
+        from backend.database import db_manager
+        positions = self.get_positions()
+        total_value = self.get_total_value()
+        
+        if total_value == 0:
+            return {ticker: 0.0 for ticker in positions.keys()}
+
+        breakdown = {}
+        for ticker, shares in positions.items():
+            latest_price = db_manager.get_latest_stock_price(ticker)
+            if latest_price:
+                position_value = shares * latest_price.price
+                breakdown[ticker] = (position_value / total_value) * 100
+            else:
+                breakdown[ticker] = 0.0
+        return breakdown
+
+    def get_transaction_history(self, ticker: str | None = None, transaction_type: str | None = None) -> list[Transaction]:
+        """Returns the transaction history, optionally filtered by ticker and/or transaction type."""
+        filtered_transactions = self.transactions
+        
+        if ticker:
+            filtered_transactions = [t for t in filtered_transactions if t.ticker == ticker]
+            
+        if transaction_type:
+            filtered_transactions = [t for t in filtered_transactions if t.type == transaction_type]
+            
+        return filtered_transactions
 
     def get_value(self, currency: str, evaluation_date: Optional[date] = None) -> float:
         """
@@ -41,10 +100,8 @@ class Portfolio:
             evaluation_date = date.today()
         
         try:
-            total_value = 0.0
-            for position in self.positions.values():
-                total_value += position.get_value(currency, evaluation_date)
-            return total_value
+            # TODO: Add currency conversion when implemented
+            return self.get_total_value(evaluation_date)
         except Exception as e:
             logger.error(f"Error calculating portfolio value: {e}")
             raise ValueError(f"Failed to calculate portfolio value: {e}") from e
@@ -75,10 +132,15 @@ class Portfolio:
             raise ValueError("Currency must be a non-empty string")
             
         try:
-            total_price = 0.0
-            for position in self.positions.values():
-                total_price += position.get_cost_basis(currency)
-            return total_price
+            from backend.database import db_manager
+            positions = self.get_positions()
+            total_cost = 0.0
+            
+            for ticker in positions.keys():
+                cost_basis = db_manager.get_position_cost_basis(ticker, date.today(), currency)
+                total_cost += cost_basis
+                
+            return total_cost
         except Exception as e:
             logger.error(f"Error calculating gross purchase price: {e}")
             raise ValueError(f"Failed to calculate gross purchase price: {e}") from e
@@ -92,230 +154,131 @@ class Portfolio:
             logger.error(f"Error calculating euro gross purchase price: {e}")
             return 0.0  # Return 0 instead of raising an error
 
-    def get_net_purchase_price(self, currency: str) -> float:
+    def get_unrealized_pl(self, currency: str, evaluation_date: Optional[date] = None) -> float:
         """
-        Calculate total purchase price excluding transaction costs
+        Calculate total unrealized profit/loss for the portfolio
         
         Args:
             currency: Target currency code
+            evaluation_date: Date for the valuation (default: today)
             
         Returns:
-            The net purchase price in the specified currency
+            The unrealized profit/loss in the specified currency
             
         Raises:
-            ValueError: If net purchase price cannot be calculated
+            ValueError: If unrealized P/L cannot be calculated
+        """
+        if not currency or not isinstance(currency, str):
+            raise ValueError("Currency must be a non-empty string")
+            
+        if evaluation_date is None:
+            evaluation_date = date.today()
+            
+        try:
+            current_value = self.get_value(currency, evaluation_date)
+            cost_basis = self.get_gross_purchase_price(currency)
+            return current_value - cost_basis
+        except Exception as e:
+            logger.error(f"Error calculating unrealized P/L: {e}")
+            raise ValueError(f"Failed to calculate unrealized P/L: {e}") from e
+
+    def get_dividend_income(self, currency: str, start_date: Optional[date] = None, 
+                           end_date: Optional[date] = None) -> float:
+        """
+        Calculate total dividend income over a period
+        
+        Args:
+            currency: Target currency code
+            start_date: Start date for calculation (default: beginning of time)
+            end_date: End date for calculation (default: today)
+            
+        Returns:
+            Total dividend income in the specified currency
+        """
+        if not currency or not isinstance(currency, str):
+            raise ValueError("Currency must be a non-empty string")
+            
+        if end_date is None:
+            end_date = date.today()
+            
+        total_dividends = 0.0
+        for transaction in self.transactions:
+            if (transaction.type == TransactionType.DIVIDEND and
+                (start_date is None or transaction.date >= start_date) and
+                transaction.date <= end_date):
+                # TODO: Add currency conversion when implemented
+                dividend_amount = transaction.amount * transaction.price
+                total_dividends += dividend_amount
+                
+        return total_dividends
+
+    def get_dividend_yield(self, currency: str = 'EUR') -> float:
+        """
+        Calculate current dividend yield for the portfolio
+        
+        Args:
+            currency: Target currency code (default: EUR)
+            
+        Returns:
+            The dividend yield as a decimal value
         """
         if not currency or not isinstance(currency, str):
             raise ValueError("Currency must be a non-empty string")
             
         try:
-            total_price = 0.0
-            for ticker, position in self.positions.items():
-                # Net price is price without transaction costs
-                net_price_per_share = position.purchase_price_net.get_money_amount(currency)
-                total_price += net_price_per_share * position.amount
-            return total_price
+            # Get annual dividend income (last 12 months)
+            today = date.today()
+            one_year_ago = date(today.year - 1, today.month, today.day)
+            annual_dividend = self.get_dividend_income(currency, one_year_ago, today)
+            
+            # If no dividends in the last year, try using all historical dividends
+            if annual_dividend <= 0:
+                # Use a fixed start date that includes historical data
+                fixed_start_date = date(2022, 1, 1)
+                annual_dividend = self.get_dividend_income(currency, fixed_start_date, today)
+                logger.info(f"No dividends in last year, using all dividends since {fixed_start_date}")
+                
+                # If still no dividends, return 0
+                if annual_dividend <= 0:
+                    return 0.0
+                
+                # Annualize the dividend income if we're using more than a year of data
+                days_in_period = (today - fixed_start_date).days
+                if days_in_period > 365:
+                    annual_dividend = annual_dividend * 365 / days_in_period
+            
+            # Get current portfolio value
+            current_value = self.get_value(currency)
+            
+            # Calculate yield
+            if current_value > 0:
+                return (annual_dividend / current_value)  # Return as decimal
+            return 0.0
         except Exception as e:
-            logger.error(f"Error calculating net purchase price: {e}")
-            raise ValueError(f"Failed to calculate net purchase price: {e}") from e
+            logger.error(f"Error calculating dividend yield: {e}")
+            return 0.0
 
-    @property
-    def euro_net_purchase_price(self) -> float:
-        """Get net purchase price in EUR"""
-        try:
-            return self.get_net_purchase_price('EUR')
-        except Exception as e:
-            logger.error(f"Error calculating euro net purchase price: {e}")
-            return 0.0  # Return 0 instead of raising an error
+    def get_historical_value(self, start_date: date, end_date: date) -> dict[date, float]:
+        """
+        Calculates the historical value of the portfolio over a date range.
+        """
+        from backend.database import db_manager
+        values_series = db_manager.get_portfolio_values_over_time(start_date, end_date)
+        return {date.date(): value for date, value in values_series.items()}
+        
+    def __str__(self) -> str:
+        """String representation of portfolio"""
+        positions = self.get_positions()
+        return f"Portfolio with {len(positions)} positions, {len(self.transactions)} transactions"
+        
+    def __repr__(self) -> str:
+        """Detailed representation of portfolio"""
+        positions = self.get_positions()
+        return f"Portfolio(positions={len(positions)}, transactions={len(self.transactions)})"
 
-    def transaction(self, transaction_type: str, stock: Stock, amount: float, 
-                   price: float, currency: str, transaction_date: Optional[date] = None,
-                   transaction_cost: Optional[float] = None) -> bool:
-        """
-        Execute a new transaction and update portfolio accordingly
-        
-        Args:
-            transaction_type: Type of transaction (buy, sell, dividend)
-            stock: The stock involved in the transaction
-            amount: Number of shares
-            price: Price per share
-            currency: Currency of the transaction
-            transaction_date: Date of the transaction (default: today)
-            transaction_cost: Custom transaction cost (default: None, will be calculated automatically)
-            
-        Returns:
-            True if transaction was successful, False otherwise
-            
-        Raises:
-            ValueError: If transaction parameters are invalid
-        """
-        if not transaction_type or transaction_type not in ["buy", "sell", "dividend"]:
-            raise ValueError(f"Invalid transaction type: {transaction_type}")
-            
-        if not isinstance(stock, Stock):
-            raise TypeError(f"Expected Stock object, got {type(stock)}")
-            
-        if not isinstance(amount, (int, float)) or amount <= 0:
-            raise ValueError(f"Amount must be a positive number, got {amount}")
-            
-        if not isinstance(price, (int, float)) or (price <= 0 and transaction_type != "dividend"):
-            # Allow zero price for dividends
-            raise ValueError(f"Price must be a positive number, got {price}")
-            
-        if not currency or not isinstance(currency, str):
-            raise ValueError(f"Currency must be a non-empty string, got {currency}")
-            
-        if transaction_date is None:
-            transaction_date = date.today()
-            
-        try:
-            transaction = Transaction(transaction_type, stock, amount, price, currency, transaction_date, transaction_cost)
-
-            if transaction_type == "dividend":
-                # For dividends, just record the transaction
-                dividend = cast(Dividend, transaction)  # This is safe because we know it's a dividend
-                self.dividends.append(dividend)
-                self.transactions.append(transaction)
-                return True
-            elif self.update_position(transaction):
-                self.transactions.append(transaction)
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"Error executing transaction: {e}")
-            raise ValueError(f"Failed to execute transaction: {e}") from e
-        
-    def add_dividend(self, stock: Stock, shares: float, dividend_per_share: float, 
-                    currency: str, transaction_date: Optional[date] = None,
-                    transaction_cost: Optional[float] = None) -> bool:
-        """
-        Add a dividend transaction
-        
-        Args:
-            stock: The stock paying the dividend
-            shares: Number of shares owned
-            dividend_per_share: Dividend amount per share
-            currency: Currency of the dividend
-            transaction_date: Date of the dividend payment (default: today)
-            transaction_cost: Custom transaction cost (default: None, will be calculated automatically)
-            
-        Returns:
-            True if dividend was added successfully
-            
-        Raises:
-            ValueError: If dividend parameters are invalid
-        """
-        if not isinstance(stock, Stock):
-            raise TypeError(f"Expected Stock object, got {type(stock)}")
-            
-        if not isinstance(shares, (int, float)) or shares <= 0:
-            raise ValueError(f"Shares must be a positive number, got {shares}")
-            
-        if not isinstance(dividend_per_share, (int, float)) or dividend_per_share < 0:
-            raise ValueError(f"Dividend per share must be a non-negative number, got {dividend_per_share}")
-            
-        if not currency or not isinstance(currency, str):
-            raise ValueError(f"Currency must be a non-empty string, got {currency}")
-            
-        if transaction_date is None:
-            transaction_date = date.today()
-            
-        try:
-            dividend = Dividend(stock, shares, dividend_per_share, currency, transaction_date, transaction_cost)
-            self.dividends.append(dividend)
-            self.transactions.append(dividend)
-            return True
-        except Exception as e:
-            logger.error(f"Error adding dividend: {e}")
-            raise ValueError(f"Failed to add dividend: {e}") from e
-
-    def update_position(self, transaction: Transaction) -> bool:
-        """
-        Update portfolio positions based on transaction
-        
-        Args:
-            transaction: A transaction to update the portfolio
-            
-        Returns:
-            True if position was updated successfully, False otherwise
-            
-        Raises:
-            ValueError: If position update fails
-        """
-        if not isinstance(transaction, Transaction):
-            raise TypeError(f"Expected Transaction object, got {type(transaction)}")
-            
-        if transaction.type == "dividend":
-            # Dividends don't affect positions
-            return True
-            
-        ticker = transaction.stock.ticker
-        
-        try:
-            if transaction.type == "buy":
-                if ticker not in self.positions:
-                    self.positions[ticker] = Position(transaction)
-                else:
-                    self.positions[ticker].update(transaction)
-            elif transaction.type == "sell":
-                if ticker not in self.positions:
-                    logger.warning(f"Cannot sell {ticker} - position does not exist")
-                    return False
-                else:
-                    self.positions[ticker].update(transaction)
-                    if self.positions[ticker].amount == 0:
-                        del self.positions[ticker]
-            return True
-        except Exception as e:
-            logger.error(f"Error updating position: {e}")
-            raise ValueError(f"Failed to update position: {e}") from e
-
-    def get_position(self, ticker: str) -> Optional[Position]:
-        """
-        Get position for a specific stock ticker
-        
-        Args:
-            ticker: Stock ticker symbol
-            
-        Returns:
-            The Position object or None if not found
-        """
-        if not ticker or not isinstance(ticker, str):
-            raise ValueError("Ticker must be a non-empty string")
-            
-        return self.positions.get(ticker)
-
-    def get_transaction_history(self, start_date: Optional[date] = None, 
-                               end_date: Optional[date] = None, 
-                               transaction_type: Optional[str] = None) -> List[Transaction]:
-        """
-        Get filtered transaction history
-        
-        Args:
-            start_date: Start date for filtering (default: None)
-            end_date: End date for filtering (default: None)
-            transaction_type: Type of transactions to include (default: None)
-            
-        Returns:
-            List of transactions matching the filters
-        """
-        if transaction_type and transaction_type not in ["buy", "sell", "dividend"]:
-            raise ValueError(f"Invalid transaction type: {transaction_type}")
-            
-        filtered_transactions: List[Transaction] = []
-        for transaction in self.transactions:
-            if start_date and transaction.date < start_date:
-                continue
-            if end_date and transaction.date > end_date:
-                continue
-            if transaction_type and transaction.type != transaction_type:
-                continue
-            filtered_transactions.append(transaction)
-        return filtered_transactions
-        
     def get_dividend_history(self, start_date: Optional[date] = None, 
                             end_date: Optional[date] = None, 
-                            ticker: Optional[str] = None) -> List[Dividend]:
+                            ticker: Optional[str] = None) -> list[Transaction]:
         """
         Get filtered dividend history
         
@@ -325,53 +288,22 @@ class Portfolio:
             ticker: Stock ticker to filter by (default: None)
             
         Returns:
-            List of dividends matching the filters
+            List of dividend transactions matching the filters
         """
-        filtered_dividends: List[Dividend] = []
-        for dividend in self.dividends:
+        dividend_transactions = [t for t in self.transactions if t.type == TransactionType.DIVIDEND]
+        
+        filtered_dividends = []
+        for dividend in dividend_transactions:
             if start_date and dividend.date < start_date:
                 continue
             if end_date and dividend.date > end_date:
                 continue
-            if ticker and dividend.stock.ticker != ticker:
+            if ticker and dividend.ticker != ticker:
                 continue
             filtered_dividends.append(dividend)
         return filtered_dividends
-        
-    def get_dividend_income(self, currency: str, start_date: Optional[date] = None, 
-                           end_date: Optional[date] = None) -> float:
-        """
-        Calculate total dividend income in specified currency
-        
-        Args:
-            currency: Target currency code
-            start_date: Start date for filtering (default: None)
-            end_date: End date for filtering (default: None)
-            
-        Returns:
-            The total dividend income in the specified currency
-            
-        Raises:
-            ValueError: If dividend income cannot be calculated
-        """
-        if not currency or not isinstance(currency, str):
-            raise ValueError("Currency must be a non-empty string")
-            
-        try:
-            # Get filtered dividend history
-            dividends = self.get_dividend_history(start_date, end_date)
-            
-            # Sum up dividend income
-            total_income = 0.0
-            for dividend in dividends:
-                total_income += dividend.get_transaction_value(currency)
-                
-            return total_income
-        except Exception as e:
-            logger.error(f"Error calculating dividend income: {e}")
-            return 0.0
-            
-    def get_realized_pl_transactions(self, currency: str) -> List[Dict[str, any]]:
+
+    def get_realized_pl_transactions(self, currency: str) -> list[dict]:
         """
         Get realized profit/loss transactions in the specified currency
         
@@ -386,19 +318,19 @@ class Portfolio:
             
         try:
             # Get all sell transactions
-            sell_transactions = self.get_transaction_history(transaction_type="sell")
+            sell_transactions = [t for t in self.transactions if t.type == 'sell']
             
             if not sell_transactions:
                 return []
                 
             # Group transactions by ticker
-            ticker_transactions: Dict[str, List[Dict[str, any]]] = {}
+            ticker_transactions: Dict[str, List[Dict[str, Any]]] = {}
             
             # First, process all buy transactions
-            buy_transactions = self.get_transaction_history(transaction_type="buy")
+            buy_transactions = [t for t in self.transactions if t.type == 'buy']
             
             for transaction in buy_transactions:
-                ticker = transaction.stock.ticker
+                ticker = transaction.ticker
                 
                 if ticker not in ticker_transactions:
                     ticker_transactions[ticker] = []
@@ -407,8 +339,8 @@ class Portfolio:
                     'type': 'buy',
                     'date': transaction.date,
                     'amount': transaction.amount,
-                    'price': transaction.price.get_money_amount(currency),
-                    'cost': transaction.cost.get_money_amount(currency)
+                    'price': transaction.price,  # Already a float
+                    'cost': transaction.cost     # Already a float
                 })
                 
             # Sort buy transactions by date (FIFO)
@@ -419,15 +351,15 @@ class Portfolio:
             realized_pl_transactions = []
             
             for transaction in sell_transactions:
-                ticker = transaction.stock.ticker
+                ticker = transaction.ticker
                 
                 if ticker not in ticker_transactions:
                     logger.warning(f"No buy transactions found for {ticker}")
                     continue
                     
                 sell_amount = transaction.amount
-                sell_price = transaction.price.get_money_amount(currency)
-                sell_cost = transaction.cost.get_money_amount(currency)
+                sell_price = transaction.price
+                sell_cost = transaction.cost
                 sell_date = transaction.date
                 
                 # Match sell with buy transactions (FIFO)
@@ -488,8 +420,8 @@ class Portfolio:
         except Exception as e:
             logger.error(f"Error calculating realized P/L transactions: {e}")
             return []
-            
-    def get_dividend_transactions(self, currency: str) -> List[Dict[str, any]]:
+
+    def get_dividend_transactions(self, currency: str) -> list[dict]:
         """
         Get dividend transactions in the specified currency
         
@@ -513,13 +445,13 @@ class Portfolio:
             dividend_transactions = []
             
             for dividend in dividends:
-                dividend_value = dividend.get_transaction_value(currency)
+                dividend_value = dividend.amount * dividend.price
                 
                 dividend_transactions.append({
-                    'ticker': dividend.stock.ticker,
+                    'ticker': dividend.ticker,
                     'date': dividend.date,
                     'shares': dividend.amount,
-                    'dividend_per_share': dividend.dividend_per_share,
+                    'dividend_per_share': dividend.price,
                     'amount': dividend_value,
                     'year': dividend.date.year,
                     'currency': currency
@@ -529,175 +461,4 @@ class Portfolio:
         except Exception as e:
             logger.error(f"Error calculating dividend transactions: {e}")
             return []
-            
-    def get_unrealized_pl(self, currency: str, evaluation_date: Optional[date] = None) -> float:
-        """
-        Calculate total unrealized profit/loss for the portfolio
-        
-        Args:
-            currency: Target currency code
-            evaluation_date: Date for the valuation (default: today)
-            
-        Returns:
-            The unrealized profit/loss in the specified currency
-            
-        Raises:
-            ValueError: If unrealized P/L cannot be calculated
-        """
-        if not currency or not isinstance(currency, str):
-            raise ValueError("Currency must be a non-empty string")
-            
-        if evaluation_date is None:
-            evaluation_date = date.today()
-            
-        try:
-            current_value = self.get_value(currency, evaluation_date)
-            cost_basis = self.get_gross_purchase_price(currency)
-            return current_value - cost_basis
-        except Exception as e:
-            logger.error(f"Error calculating unrealized P/L: {e}")
-            raise ValueError(f"Failed to calculate unrealized P/L: {e}") from e
-        
-    def get_dividend_yield(self, currency: str = 'EUR') -> float:
-        """
-        Calculate current dividend yield for the portfolio
-        
-        Args:
-            currency: Target currency code (default: EUR)
-            
-        Returns:
-            The dividend yield as a decimal value (divide by 100) for .2% format
-        """
-        if not currency or not isinstance(currency, str):
-            raise ValueError("Currency must be a non-empty string")
-            
-        try:
-            # Get annual dividend income (last 12 months)
-            today = date.today()
-            one_year_ago = date(today.year - 1, today.month, today.day)
-            annual_dividend = self.get_dividend_income(currency, one_year_ago, today)
-            
-            # If no dividends in the last year, try using all historical dividends
-            if annual_dividend <= 0:
-                # Use a fixed start date that includes the sample data (2022-01-01)
-                fixed_start_date = date(2022, 1, 1)
-                annual_dividend = self.get_dividend_income(currency, fixed_start_date, today)
-                logger.info(f"No dividends in last year, using all dividends since {fixed_start_date}")
-                
-                # If still no dividends, return 0
-                if annual_dividend <= 0:
-                    return 0.0
-                
-                # Annualize the dividend income if we're using more than a year of data
-                days_in_period = (today - fixed_start_date).days
-                if days_in_period > 365:
-                    annual_dividend = annual_dividend * 365 / days_in_period
-            
-            # Get current portfolio value
-            current_value = self.get_value(currency)
-            
-            # Calculate yield
-            if current_value > 0:
-                return (annual_dividend / current_value)  # Return as decimal for .2% format
-            return 0.0
-        except Exception as e:
-            logger.error(f"Error calculating dividend yield: {e}")
-            return 0.0  # Return 0 instead of raising an error
-            
-    def get_position_breakdown(self, currency: str = 'EUR', 
-                              evaluation_date: Optional[date] = None) -> pd.DataFrame:
-        """
-        Get a DataFrame with position details
-        
-        Args:
-            currency: Target currency code (default: EUR)
-            evaluation_date: Date for the valuation (default: today)
-            
-        Returns:
-            DataFrame with position details
-        """
-        if not currency or not isinstance(currency, str):
-            raise ValueError("Currency must be a non-empty string")
-            
-        if evaluation_date is None:
-            evaluation_date = date.today()
-            
-        try:
-            # Create position data
-            position_data = []
-            total_value = self.get_value(currency, evaluation_date)
-            
-            for ticker, position in self.positions.items():
-                market_value = position.get_value(currency, evaluation_date)
-                cost_basis = position.get_cost_basis(currency)
-                unrealized_pl = position.get_unrealized_pl(currency, evaluation_date)
-                
-                # Calculate return percentage
-                return_pct = 0.0
-                if cost_basis > 0:
-                    return_pct = (unrealized_pl / cost_basis) * 100
-                    
-                # Calculate weight in portfolio
-                weight_pct = 0.0
-                if total_value > 0:
-                    weight_pct = (market_value / total_value) * 100
-                    
-                position_row = {
-                    'ticker': ticker,
-                    'shares': position.amount,
-                    'market_value': market_value,
-                    'cost_basis': cost_basis,
-                    'unrealized_pl': unrealized_pl,
-                    'return_pct': return_pct / 100,  # Convert to decimal for .2% format
-                    'weight_pct': weight_pct / 100,  # Convert to decimal for .2% format
-                    'currency': currency
-                }
-                position_data.append(position_row)
-                
-            # Verify that weights sum to 100% (allowing for small floating point errors)
-            if position_data:
-                total_weight = sum(pos['weight_pct'] for pos in position_data)
-                # If the total weight is not close to 1.0 (100%), normalize the weights
-                if abs(total_weight - 1.0) > 0.0001:
-                    logger.warning(f"Portfolio weights sum to {total_weight*100:.2f}%, normalizing to 100%")
-                    for pos in position_data:
-                        if total_weight > 0:  # Avoid division by zero
-                            pos['weight_pct'] = (pos['weight_pct'] / total_weight)
-                
-            # Create DataFrame
-            if not position_data:
-                # Return empty DataFrame with correct columns
-                return pd.DataFrame(columns=[
-                    'ticker', 'name', 'shares', 'market_value', 'cost_basis', 
-                    'unrealized_pl', 'return_pct', 'weight_pct', 'sector', 'country', 'currency'
-                ])
-                
-            df = pd.DataFrame(position_data)
-            
-            # Ensure correct data types
-            df['ticker'] = df['ticker'].astype(str)
-            df['shares'] = df['shares'].astype(float)
-            df['market_value'] = df['market_value'].astype(float)
-            df['cost_basis'] = df['cost_basis'].astype(float)
-            df['unrealized_pl'] = df['unrealized_pl'].astype(float)
-            df['return_pct'] = df['return_pct'].astype(float)
-            df['weight_pct'] = df['weight_pct'].astype(float)
-            df['currency'] = df['currency'].astype(str)
-            
-            return df
-        except Exception as e:
-            logger.error(f"Error creating position breakdown: {e}")
-            # Return empty DataFrame with correct columns
-            return pd.DataFrame(columns=[
-                'ticker', 'name', 'shares', 'market_value', 'cost_basis', 
-                'unrealized_pl', 'return_pct', 'weight_pct', 'sector', 'country', 'currency'
-            ])
-            
-    def __str__(self) -> str:
-        """String representation of portfolio"""
-        return f"Portfolio with {len(self.positions)} positions, {len(self.transactions)} transactions"
-        
-    def __repr__(self) -> str:
-        """Detailed representation of portfolio"""
-        return f"Portfolio(positions={len(self.positions)}, transactions={len(self.transactions)})"
 

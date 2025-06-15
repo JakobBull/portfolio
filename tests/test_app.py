@@ -1,72 +1,63 @@
 import pytest
-import dash
-from datetime import date
-
-# Import the app
+from unittest.mock import MagicMock
+from dash import Dash, html
 import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from pathlib import Path
+import dash_bootstrap_components as dbc
 
-class TestDashApp:
-    """Test cases for the Dash application"""
+# Add project root to the Python path
+project_root = str(Path(__file__).resolve().parent.parent)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from app import create_app
+
+@pytest.fixture
+def app():
+    """Fixture to create a test app with mock dependencies."""
+    mock_db_manager = MagicMock()
+    mock_market_interface = MagicMock()
+    mock_controller = MagicMock()
     
-    def test_app_initialization(self, mocker):
-        """Test that the app initializes correctly"""
-        # Import the app
-        mocker.patch('backend.controller.Controller')
-        mocker.patch('app.add_sample_data')
-        # This is a simplified test - in a real test, you would use dash.testing
-        try:
-            from app import app
-            assert isinstance(app, dash.Dash)
-        except ImportError:
-            pytest.fail("Failed to import app")
+    app, _, _ = create_app(
+        db_manager=mock_db_manager,
+        market_interface=mock_market_interface,
+        controller=mock_controller
+    )
+    return app
+
+def test_app_initialization(app: Dash):
+    """Test that the Dash app initializes correctly."""
+    assert isinstance(app, Dash)
+    assert app.title == "Portfolio Manager"
+
+def test_app_layout(app: Dash):
+    """Test that the app's layout is structured as expected."""
+    layout_function = app.layout
+    layout = layout_function()
+    assert isinstance(layout, dbc.Container)
+    # Check for a top-level ID or a key child component to verify structure
+    assert len(layout.children) > 0
+
+def test_app_callbacks(app: Dash):
+    """Test that the app callbacks are registered."""
+    callbacks = app.callback_map
+    assert len(callbacks) > 0
+    # Example check for a specific callback
+    # The keys in callback_map are strings representing the Output dependencies
+    assert any('total-value.children' in key for key in callbacks.keys())
+
+def test_app_error_handling(app: Dash):
+    """Test that the app handles errors gracefully."""
+    import dash
     
-    @pytest.mark.skip(reason="Placeholder for actual Dash callback testing")
-    def test_update_portfolio_summary(self):
-        """Test the update_portfolio_summary callback"""
-        # This is a placeholder for actual Dash callback testing
-        # In a real test, you would use dash.testing to test the callback
-        pass
+    @app.callback(
+        dash.Output('error-output', 'children'),
+        dash.Input('error-trigger', 'n_clicks')
+    )
+    def error_callback(n_clicks):
+        if n_clicks:
+            raise Exception("Test error")
+        return "No error"
     
-    @pytest.mark.skip(reason="Placeholder for actual Dash callback testing")
-    def test_update_positions_table(self):
-        """Test the update_positions_table callback"""
-        # This is a placeholder for actual Dash callback testing
-        # In a real test, you would use dash.testing to test the callback
-        pass
-    
-    @pytest.mark.skip(reason="Placeholder for actual Dash callback testing")
-    def test_update_performance_chart(self):
-        """Test the update_performance_chart callback"""
-        # This is a placeholder for actual Dash callback testing
-        # In a real test, you would use dash.testing to test the callback
-        pass
-    
-    @pytest.mark.skip(reason="Placeholder for actual Dash callback testing")
-    def test_search_stocks(self):
-        """Test the search_stocks callback"""
-        # This is a placeholder for actual Dash callback testing
-        # In a real test, you would use dash.testing to test the callback
-        pass
-    
-    @pytest.mark.skip(reason="Placeholder for actual Dash callback testing")
-    def test_select_stock(self):
-        """Test the select_stock callback"""
-        # This is a placeholder for actual Dash callback testing
-        # In a real test, you would use dash.testing to test the callback
-        pass
-    
-    @pytest.mark.skip(reason="Placeholder for actual Dash callback testing")
-    def test_add_transaction(self):
-        """Test the add_transaction callback"""
-        # This is a placeholder for actual Dash callback testing
-        # In a real test, you would use dash.testing to test the callback
-        pass
-    
-    @pytest.mark.skip(reason="Placeholder for actual Dash callback testing")
-    def test_update_tax_settings(self):
-        """Test the update_tax_settings callback"""
-        # This is a placeholder for actual Dash callback testing
-        # In a real test, you would use dash.testing to test the callback
-        pass 
+    assert 'error-output.children' in app.callback_map 

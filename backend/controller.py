@@ -7,9 +7,11 @@ from backend.portfolio import Portfolio
 from backend.money_amount import MoneyAmount
 from backend.tax_calculator import GermanTaxCalculator
 from backend.benchmark import BenchmarkComparison, Benchmark, NasdaqBenchmark, SP500Benchmark, DAX30Benchmark
-from backend.stock import Stock
+from backend.database import Stock, Transaction
 from backend.database import db_manager, DatabaseManager
+from backend.database import TransactionType
 import json
+from backend.market_interface import MarketInterface
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -18,215 +20,168 @@ logger = logging.getLogger(__name__)
 class Controller:
     """Main controller class for the portfolio management system"""
     
-    def __init__(self, portfolio: Optional[Portfolio] = None) -> None:
-        """
-        Initialize controller with optional portfolio
-        
-        Args:
-            portfolio: An existing Portfolio object (default: None)
-        """
-        if portfolio is None:
-            self.portfolio = Portfolio()
-            # Load portfolio data from database
-            self._load_portfolio_from_db()
-        else:
-            if not isinstance(portfolio, Portfolio):
-                raise TypeError(f"Expected Portfolio object, got {type(portfolio)}")
-            self.portfolio = portfolio
-            
-        # Initialize tax calculator with default settings
-        self.tax_calculator = GermanTaxCalculator()
-        
-        # Initialize benchmark comparison
-        self.benchmark_comparison: Optional[BenchmarkComparison] = None
-        
-        # Make db_manager accessible as an attribute
+    def __init__(self, db_manager: DatabaseManager, market_interface: MarketInterface):
+        """Initializes the controller."""
         self.db_manager = db_manager
+        self.market_interface = market_interface
+        self.portfolio = self._load_portfolio_from_db()
+        self.tax_calculator = GermanTaxCalculator()
+        self.benchmark_comparison = None
+        self.benchmark_start_date = None
+        self.benchmark_end_date = None
         
-    def _load_portfolio_from_db(self) -> None:
-        """Load portfolio data from the database"""
-        try:
-            # Load transactions
-            transactions = db_manager.get_all_transactions()
-            for transaction in transactions:
-                if transaction['is_dividend']:
-                    continue  # Skip dividend transactions, they'll be loaded separately
-                
-                # Create stock object
-                stock = Stock(transaction['ticker'])
-                
-                # Execute transaction
-                self.portfolio.transaction(
-                    transaction['type'],
-                    stock,
-                    transaction['amount'],
-                    transaction['price'],
-                    transaction['currency'],
-                    transaction['transaction_date']
-                )
-                
-            # Load dividends
-            dividends = db_manager.get_dividend_transactions()
-            for dividend in dividends:
-                # Create stock object
-                stock = Stock(dividend['ticker'])
-                
-                # Add dividend
-                self.portfolio.add_dividend(
-                    stock,
-                    dividend['amount'],
-                    dividend['dividend_per_share'],
-                    dividend['currency'],
-                    dividend['transaction_date']
-                )
-                
-            # Update portfolio positions with latest market data
-            self._update_positions_with_market_data()
-                
-            logging.info("Portfolio loaded from database successfully")
-        except Exception as e:
-            logging.error(f"Error loading portfolio from database: {e}")
-            # Continue with empty portfolio
-            
-    def _update_positions_with_market_data(self) -> None:
-        """Update portfolio positions with latest market data"""
-        try:
-            for ticker, position in self.portfolio.positions.items():
-                # Get latest market data
-                market_data = db_manager.get_latest_market_data(ticker)
-                if market_data:
-                    # Calculate position value
-                    value = market_data['close_price'] * position.amount
-                    
-                    # Update position in database
-                    db_manager.update_position_value(
-                        ticker,
-                        value,
-                        market_data['currency'],
-                        market_data['date'],
-                        value - position.get_cost_basis(market_data['currency']),
-                        position.get_return_percentage(market_data['currency'])
-                    )
-        except Exception as e:
-            logging.error(f"Error updating positions with market data: {e}")
-            
-    def add_transaction(self, transaction_type: str, ticker: str, amount: float, 
-                      price: float, currency: str, transaction_date: Optional[date] = None,
-                      transaction_cost: Optional[float] = None) -> bool:
-        """
-        Add a new transaction to the portfolio
+    def _load_portfolio_from_db(self) -> Portfolio:
+        """Loads portfolio data from the database using transactions."""
+        transactions = self.db_manager.get_all_transactions()
+        # Portfolio no longer needs positions parameter since we calculate from transactions
+        return Portfolio([], transactions)
+
+    def add_stock(self, ticker: str, name: str, currency: str, sector: str = None, country: str = None) -> Stock | None:
+        """Adds a new stock."""
+        return self.db_manager.add_stock(ticker, name, currency, sector, country)
+
+    def add_transaction(
+        self,
+        ticker: str,
+        transaction_type: str,
+        shares: float,
+        price: float,
+        transaction_date: date,
+        currency: str,
+        transaction_cost: float,
+        sell_target: Optional[float] = None
+    ) -> bool:
+        """Adds a new transaction."""
+        logger.info(f"Adding transaction: {ticker}, {transaction_type}, {shares}, {price}, {transaction_date}, {currency}, {transaction_cost}")
         
-        Args:
-            transaction_type: Type of transaction (buy, sell, dividend)
-            ticker: Stock ticker symbol
-            amount: Number of shares
-            price: Price per share
-            currency: Currency of the transaction
-            transaction_date: Date of the transaction (default: today)
-            transaction_cost: Custom transaction cost (default: None, will be calculated automatically)
-            
-        Returns:
-            True if transaction was added successfully, False otherwise
-            
-        Raises:
-            ValueError: If transaction parameters are invalid
-        """
-        if not transaction_type or transaction_type not in ["buy", "sell", "dividend"]:
-            raise ValueError(f"Invalid transaction type: {transaction_type}")
-            
-        if not ticker or not isinstance(ticker, str):
-            raise ValueError("Ticker must be a non-empty string")
-            
-        if not isinstance(amount, (int, float)) or amount <= 0:
-            raise ValueError(f"Amount must be a positive number, got {amount}")
-            
-        if not isinstance(price, (int, float)) or (price <= 0 and transaction_type != "dividend"):
-            # Allow zero price for dividends
-            raise ValueError(f"Price must be a positive number, got {price}")
-            
-        if not currency or not isinstance(currency, str):
-            raise ValueError(f"Currency must be a non-empty string, got {currency}")
-            
-        if transaction_date is None:
-            transaction_date = date.today()
-            
         try:
-            # Create stock object
-            stock = Stock(ticker)
-            
-            # Get stock information
-            stock_name = stock.get_name()
-            stock_sector = stock.get_sector()
-            stock_country = stock.get_country()
-            
-            # Calculate transaction cost if not provided
-            if transaction_cost is None:
-                transaction_cost = self._calculate_transaction_cost(transaction_type, amount, price, currency)
+            # Step 1: Check if stock exists, if not, try to add it.
+            stock = self.db_manager.get_stock(ticker)
+            if not stock:
+                logger.info(f"Stock {ticker} not found in database, attempting to fetch and add.")
+                stock_info = self.market_interface.get_stock_info(ticker)
+                if not stock_info:
+                    logger.error(f"Could not find stock information for ticker {ticker}")
+                    return False
                 
-            # Add transaction to database
-            db_transaction_added = db_manager.add_transaction(
-                transaction_type, ticker, amount, price, currency, transaction_date,
-                transaction_cost, transaction_type == "dividend", stock_name, stock_sector, stock_country
+                stock = self.add_stock(
+                    ticker=ticker,
+                    name=stock_info.get('name', ticker),
+                    currency=currency, # Use currency from form
+                    sector=stock_info.get('sector'),
+                    country=stock_info.get('country')
+                )
+                if not stock:
+                    logger.error(f"Failed to add new stock {ticker} to database.")
+                    return False
+
+            # Step 2: Add the transaction to the database
+            self.db_manager.add_transaction(
+                transaction_type=transaction_type,
+                ticker=ticker,
+                amount=shares,
+                price=price,
+                currency=currency,
+                transaction_date=transaction_date,
+                cost=transaction_cost
             )
+
+            # Step 3: Reload portfolio to reflect new transaction
+            self.portfolio = self._load_portfolio_from_db()
             
-            if not db_transaction_added:
-                logger.error(f"Failed to add transaction to database")
-                return False
-                
-            # Add transaction to portfolio
-            if transaction_type == "dividend":
-                # For dividends, use the add_dividend method
-                self.portfolio.add_dividend(stock, amount, price, currency, transaction_date, transaction_cost)
-            else:
-                # For buy/sell, use the transaction method
-                self.portfolio.transaction(transaction_type, stock, amount, price, currency, transaction_date, transaction_cost)
-                
-            # If it's a buy transaction, add or update position in database
-            if transaction_type == "buy":
-                # Get current position from portfolio
-                position = self.portfolio.get_position(ticker)
-                
-                if position:
-                    # Add or update position in database
-                    db_manager.add_position(
-                        ticker, position.amount, position.purchase_price_net.amount,
-                        position.purchase_price_net.currency, position.purchase_date,
-                        position.get_cost_basis(position.purchase_price_net.currency),
-                        stock_name, stock_sector, stock_country
-                    )
-                    
-            # Update market data
-            self._update_positions_with_market_data()
-                
-            logger.info(f"Added {transaction_type} transaction for {ticker}: {amount} shares at {price} {currency}")
+            logger.info("Transaction added successfully.")
             return True
+            
         except Exception as e:
-            logger.error(f"Error adding transaction: {e}")
-            raise ValueError(f"Failed to add transaction: {e}") from e
+            logger.error(f"Error during transaction process: {e}", exc_info=True)
+            return False
+
+    def get_portfolio_value(self, value_date: date | None = None) -> float:
+        """Calculates the total portfolio value on a given date."""
+        if value_date is None:
+            value_date = date.today()
+        return self.db_manager.get_portfolio_value_at_date(value_date)
+
+    def get_position_breakdown(self) -> dict[str, float]:
+        """Returns a breakdown of portfolio value by position."""
+        positions = self.db_manager.get_portfolio_positions_at_date(date.today())
+        total_value = self.get_portfolio_value()
         
-    def _calculate_transaction_cost(self, transaction_type: str, amount: float, price: float, currency: str) -> float:
-        """
-        Calculate transaction cost based on transaction type, amount, and price
+        if total_value == 0:
+            return {ticker: 0.0 for ticker in positions.keys()}
         
-        Args:
-            transaction_type: Type of transaction (buy, sell, dividend)
-            amount: Number of shares
-            price: Price per share
-            currency: Currency of the transaction
+        breakdown = {}
+        for ticker, shares in positions.items():
+            latest_price = self.db_manager.get_latest_stock_price(ticker)
+            if latest_price:
+                position_value = shares * latest_price.price
+                breakdown[ticker] = (position_value / total_value) * 100
+            else:
+                breakdown[ticker] = 0.0
+                
+        return breakdown
+
+    def get_transaction_history(self, ticker: str | None = None) -> list[Transaction]:
+        """Returns the transaction history."""
+        transactions = self.db_manager.get_all_transactions()
+        if ticker:
+            return [t for t in transactions if t.ticker == ticker]
+        return transactions
+
+    def get_historical_portfolio_value(self, start_date: date, end_date: date) -> dict[date, float]:
+        """Returns the historical portfolio value calculated from transactions."""
+        # Use the new database method to get portfolio values over time
+        values_series = self.db_manager.get_portfolio_values_over_time(start_date, end_date)
+        
+        # Convert pandas Series to dict with date keys
+        return {timestamp.date(): value for timestamp, value in values_series.items()}
+
+    def get_benchmark_data(self, ticker: str, start_date: date, end_date: date) -> pd.Series | None:
+        """Fetches benchmark data from the database."""
+        try:
+            price_data = self.db_manager.get_historical_stock_prices(ticker, start_date, end_date)
+            if not price_data:
+                logger.warning(f"No benchmark data found for {ticker} in the database.")
+                return None
             
-        Returns:
-            The calculated transaction cost
-        """
-        if transaction_type == "dividend":
-            # No transaction costs for dividends
-            return 0.0
+            dates = [p.date for p in price_data]
+            prices = [p.price for p in price_data]
+            price_series = pd.Series(prices, index=pd.to_datetime(dates))
             
-        base_fee = 5.0  # Base transaction fee
-        variable_fee = amount * price * 0.001  # 0.1% of transaction value
-        total_fee = base_fee + variable_fee
+            return price_series
+        except Exception as e:
+            logger.error(f"Error fetching benchmark data for {ticker} from database: {e}")
+            return None
+
+    def add_to_watchlist(self, ticker: str, target_price: Optional[float] = None, date_added: Optional[date] = None) -> bool:
+        """Adds a stock to the watchlist."""
+        # Ensure stock exists, if not, fetch info and add it
+        stock = self.db_manager.get_stock(ticker)
+        if not stock:
+            stock_info = self.market_interface.get_stock_info(ticker)
+            if stock_info:
+                self.add_stock(
+                    ticker,
+                    stock_info.get('name'),
+                    stock_info.get('currency', 'USD'),
+                    stock_info.get('sector'),
+                    stock_info.get('country')
+                )
+            else:
+                # If we can't get info, add with just ticker
+                self.add_stock(ticker, name=ticker, currency='USD')
         
-        return total_fee
-        
+        return self.db_manager.add_watchlist_item(
+            ticker=ticker, 
+            strike_price=target_price, 
+            date_added=date_added
+        ) is not None
+
+    def get_watchlist(self) -> list[Stock]:
+        """Returns the watchlist."""
+        # This is now safe because get_all_watchlist_items eagerly loads the stock
+        return [item.stock for item in self.db_manager.get_all_watchlist_items()]
+
     def add_dividend(self, ticker: str, shares: float, dividend_per_share: float,
                    currency: str, transaction_date: Optional[date] = None,
                    transaction_cost: Optional[float] = None) -> bool:
@@ -263,132 +218,47 @@ class Controller:
             transaction_date = date.today()
             
         try:
-            # Create stock object
-            stock = Stock(ticker)
+            # Ensure stock exists
+            stock = self.db_manager.get_stock(ticker)
+            if not stock:
+                stock_info = self.market_interface.get_stock_info(ticker)
+                if stock_info:
+                    self.add_stock(
+                        ticker,
+                        stock_info.get('name'),
+                        currency,
+                        stock_info.get('sector'),
+                        stock_info.get('country')
+                    )
+                else:
+                    self.add_stock(ticker, name=ticker, currency=currency)
             
-            # Add dividend
-            success = self.portfolio.add_dividend(
-                stock, 
-                shares, 
-                dividend_per_share, 
-                currency, 
-                transaction_date,
-                transaction_cost
+            # Add dividend transaction
+            self.db_manager.add_transaction(
+                transaction_type="dividend",
+                ticker=ticker,
+                amount=shares,
+                price=dividend_per_share,
+                currency=currency,
+                transaction_date=transaction_date,
+                cost=transaction_cost or 0.0
             )
             
-            if success:
-                # Get stock information
-                stock_name = stock.get_name()
-                stock_sector = stock.get_sector()
-                stock_country = stock.get_country()
-                
-                # Save dividend to database
-                db_manager.add_transaction(
-                    "dividend",
-                    ticker,
-                    shares,
-                    dividend_per_share,
-                    currency,
-                    transaction_date,
-                    0.0,
-                    True,
-                    stock_name,
-                    stock_sector
-                )
-                
-                # Update position dividends
-                position = self.portfolio.get_position(ticker)
-                if position:
-                    # Calculate total dividends for this position
-                    total_dividends = 0.0
-                    for dividend in self.portfolio.get_dividend_history(ticker=ticker):
-                        total_dividends += dividend.get_transaction_value(currency)
-                    
-                    # Update position in database
-                    db_manager.update_position_dividends(ticker, total_dividends)
-                
-            return success
+            # Reload portfolio
+            self.portfolio = self._load_portfolio_from_db()
+            
+            return True
         except Exception as e:
             logger.error(f"Error adding dividend: {e}")
             raise ValueError(f"Failed to add dividend: {e}") from e
-            
-    def add_to_watchlist(self, ticker: str, strike_price: float = None, notes: str = None) -> bool:
-        """
-        Add a stock to the watchlist
-        
-        Args:
-            ticker: Stock ticker symbol
-            strike_price: Target price for alerts (default: None)
-            notes: Additional notes (default: None)
-            
-        Returns:
-            True if successful, False otherwise
-            
-        Raises:
-            ValueError: If ticker is invalid
-        """
-        if not ticker or not isinstance(ticker, str):
-            raise ValueError("Ticker must be a non-empty string")
-            
-        try:
-            # Create stock object to get information
-            stock = Stock(ticker)
-            
-            # Get stock information
-            stock_name = stock.get_name()
-            stock_sector = stock.get_sector()
-            stock_country = stock.get_country()
-            
-            # Add to watchlist
-            success = db_manager.add_watchlist_item(ticker, strike_price, notes, stock_name, stock_sector, stock_country)
-            
-            if success:
-                logger.info(f"Added {ticker} to watchlist")
-                
-                # Try to update market data for this ticker
-                try:
-                    self.update_market_data(ticker, date.today())
-                except Exception as e:
-                    logger.warning(f"Could not update market data for {ticker}: {e}")
-                    
-            return success
-        except Exception as e:
-            logger.error(f"Error adding to watchlist: {e}")
-            raise ValueError(f"Failed to add to watchlist: {e}") from e
-            
+
     def remove_from_watchlist(self, ticker: str) -> bool:
-        """
-        Remove a stock from the watchlist
-        
-        Args:
-            ticker: Stock ticker symbol
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        if not ticker or not isinstance(ticker, str):
-            raise ValueError("Ticker must be a non-empty string")
-            
-        try:
-            # Remove from watchlist
-            return db_manager.delete_watchlist_item(ticker)
-        except Exception as e:
-            logger.error(f"Error removing from watchlist: {e}")
-            raise ValueError(f"Failed to remove from watchlist: {e}") from e
-            
-    def get_watchlist(self) -> List[Dict[str, Any]]:
-        """
-        Get all items in the watchlist
-        
-        Returns:
-            List of dictionaries with watchlist item data
-        """
-        try:
-            return db_manager.get_all_watchlist_items()
-        except Exception as e:
-            logger.error(f"Error getting watchlist: {e}")
-            return []
-            
+        """Removes a stock from the watchlist."""
+        stock = self.db_manager.get_stock(ticker)
+        if not stock:
+            return False
+        return self.db_manager.remove_watchlist_item(stock.ticker)
+
     def update_market_data(self, ticker: str, date_val: date, close_price: float,
                          currency: str, open_price: float = None, high_price: float = None,
                          low_price: float = None, volume: float = None) -> bool:
@@ -408,46 +278,31 @@ class Controller:
         Returns:
             True if successful, False otherwise
         """
-        if not ticker or not isinstance(ticker, str):
-            raise ValueError("Ticker must be a non-empty string")
-            
-        if not isinstance(date_val, date):
-            raise ValueError("Date must be a date object")
-            
-        if not isinstance(close_price, (int, float)) or close_price <= 0:
-            raise ValueError(f"Close price must be a positive number, got {close_price}")
-            
-        if not currency or not isinstance(currency, str):
-            raise ValueError(f"Currency must be a non-empty string, got {currency}")
-            
         try:
-            # Add market data
+            # Update market data in database
             success = db_manager.add_market_data(
-                ticker, date_val, close_price, currency,
-                open_price, high_price, low_price, volume
+                ticker=ticker,
+                date=date_val,
+                close_price=close_price,
+                currency=currency,
+                open_price=open_price,
+                high_price=high_price,
+                low_price=low_price,
+                volume=volume
             )
             
             if success:
-                # Update position if it exists
-                position = self.portfolio.get_position(ticker)
-                if position:
-                    # Calculate position value
-                    value = close_price * position.amount
-                    
-                    # Update position in database
-                    db_manager.update_position_value(
-                        ticker,
-                        value,
-                        currency,
-                        date_val,
-                        value - position.get_cost_basis(currency),
-                        position.get_return_percentage(currency)
-                    )
-                    
+                # Update stock price
+                db_manager.store_stock_price(
+                    ticker=ticker,
+                    date=date_val,
+                    price=close_price
+                )
+                
             return success
         except Exception as e:
             logger.error(f"Error updating market data: {e}")
-            raise ValueError(f"Failed to update market data: {e}") from e
+            return False
             
     def get_market_data(self, ticker: str, start_date: date = None, end_date: date = None) -> List[Dict[str, Any]]:
         """
@@ -455,24 +310,25 @@ class Controller:
         
         Args:
             ticker: Stock ticker symbol
-            start_date: Start date for historical data
-            end_date: End date for historical data
+            start_date: Start date (defaults to 30 days ago)
+            end_date: End date (defaults to today)
             
         Returns:
             List of dictionaries with market data
         """
-        if not ticker or not isinstance(ticker, str):
-            raise ValueError("Ticker must be a non-empty string")
-            
         try:
-            if start_date and end_date:
-                return db_manager.get_historical_market_data(ticker, start_date, end_date)
-            elif start_date:
-                return db_manager.get_historical_market_data(ticker, start_date, date.today())
-            else:
-                # Get latest market data
-                latest = db_manager.get_latest_market_data(ticker)
-                return [latest] if latest else []
+            # Set default dates
+            if not end_date:
+                end_date = date.today()
+            if not start_date:
+                start_date = end_date - timedelta(days=30)
+                
+            # Get historical prices from database
+            return db_manager.get_historical_market_data(
+                ticker=ticker,
+                start_date=start_date,
+                end_date=end_date
+            )
         except Exception as e:
             logger.error(f"Error getting market data: {e}")
             return []
@@ -507,111 +363,119 @@ class Controller:
             partial_exemption=partial_exemption
         )
         
-    def update_tax_settings(self, settings: List[str]) -> bool:
-        """
-        Update tax calculator settings based on a list of selected options
-        
-        Args:
-            settings: List of selected tax settings (e.g. ['married', 'church_tax'])
-            
-        Returns:
-            True if settings were updated successfully, False otherwise
-        """
+    def update_tax_settings(self, settings: list[str]) -> bool:
+        """Updates the tax calculator settings."""
         try:
-            # Parse settings
-            is_married = 'married' in settings
-            church_tax = 'church_tax' in settings
-            partial_exemption = 'partial_exemption' in settings
-            
-            # Configure tax calculator
-            self.configure_tax_calculator(
-                is_married=is_married,
-                church_tax=church_tax,
-                partial_exemption=partial_exemption
+            is_married = "is_married" in settings
+            church_tax = "church_tax" in settings
+            # partial_exemption_rate could be made configurable in the UI
+            self.tax_calculator = GermanTaxCalculator(
+                is_married=is_married, church_tax=church_tax
             )
-            
-            logger.info(f"Tax settings updated: married={is_married}, church_tax={church_tax}, partial_exemption={partial_exemption}")
             return True
-        except Exception as e:
-            logger.error(f"Error updating tax settings: {str(e)}")
+        except Exception:
             return False
         
     def get_portfolio_summary(self, currency: str = 'EUR', evaluation_date: Optional[date] = None) -> Dict[str, float]:
         """
-        Get a summary of the portfolio
+        Get portfolio summary
         
         Args:
-            currency: Target currency code (default: EUR)
-            evaluation_date: Date for the valuation (default: today)
+            currency: Currency to convert values to
+            evaluation_date: Date to evaluate portfolio at (defaults to today)
             
         Returns:
-            Dictionary with portfolio summary data
-            
-        Raises:
-            ValueError: If portfolio summary cannot be calculated
+            Dictionary with portfolio summary
         """
-        if not currency or not isinstance(currency, str):
-            raise ValueError("Currency must be a non-empty string")
-            
-        if evaluation_date is None:
-            evaluation_date = date.today()
-            
         try:
-            # Get portfolio data
-            total_value = self.portfolio.get_value(currency, evaluation_date)
-            total_cost = self.portfolio.get_gross_purchase_price(currency)
-            unrealized_pl = self.portfolio.get_unrealized_pl(currency, evaluation_date)
-            
-            # Calculate percentage return
-            percentage_return = 0.0
-            if total_cost > 0:
-                percentage_return = (unrealized_pl / total_cost) * 100
+            if not evaluation_date:
+                evaluation_date = date.today()
                 
-            # Get position count
-            position_count = len(self.portfolio.positions)
+            # Get all positions
+            positions = self.portfolio.get_positions()
             
-            # Get dividend data
-            today = date.today()
-            one_year_ago = date(today.year - 1, today.month, today.day)
-            dividend_income = self.portfolio.get_dividend_income(currency, one_year_ago, today)
+            total_value = 0.0
+            total_cost = 0.0
+            total_dividends = 0.0
             
-            # If no dividend income in the last year, try using all historical dividends
-            if dividend_income <= 0:
-                # Use a fixed start date that includes the sample data (2022-01-01)
-                fixed_start_date = date(2022, 1, 1)
-                dividend_income = self.portfolio.get_dividend_income(currency, fixed_start_date, today)
-                logger.info(f"No dividend income in last year, using all dividends since {fixed_start_date}")
+            for position in positions:
+                # Get latest price
+                latest_price = db_manager.get_market_data_at_date(
+                    ticker=position.ticker,
+                    date_val=evaluation_date
+                )
                 
-                # Annualize the dividend income if we're using more than a year of data
-                days_in_period = (today - fixed_start_date).days
-                if days_in_period > 365:
-                    dividend_income = dividend_income * 365 / days_in_period
-            
-            dividend_yield = self.portfolio.get_dividend_yield(currency)
-            
-            # Create summary
-            summary = {
+                if latest_price:
+                    # Convert price to target currency if needed
+                    if latest_price['currency'] != currency:
+                        exchange_rate = db_manager.get_exchange_rate(
+                            from_currency=latest_price['currency'],
+                            to_currency=currency,
+                            date=evaluation_date
+                        )
+                        if exchange_rate:
+                            price = latest_price['close_price'] * exchange_rate
+                        else:
+                            # Try to find closest date with exchange rate
+                            closest_data = db_manager.find_closest_date_data(
+                                'exchange_rates',
+                                f"{latest_price['currency']}_{currency}",
+                                evaluation_date
+                            )
+                            if closest_data:
+                                price = latest_price['close_price'] * closest_data[1]
+                            else:
+                                continue
+                    else:
+                        price = latest_price['close_price']
+                        
+                    # Calculate position value
+                    position_value = position.amount * price
+                    total_value += position_value
+                    
+                    # Calculate cost basis
+                    if position.purchase_currency != currency:
+                        exchange_rate = db_manager.get_exchange_rate(
+                            from_currency=position.purchase_currency,
+                            to_currency=currency,
+                            date=position.purchase_date
+                        )
+                        if exchange_rate:
+                            cost_basis = position.cost_basis * exchange_rate
+                        else:
+                            # Try to find closest date with exchange rate
+                            closest_data = db_manager.find_closest_date_data(
+                                'exchange_rates',
+                                f"{position.purchase_currency}_{currency}",
+                                position.purchase_date
+                            )
+                            if closest_data:
+                                cost_basis = position.cost_basis * closest_data[1]
+                            else:
+                                cost_basis = position.cost_basis
+                    else:
+                        cost_basis = position.cost_basis
+                        
+                    total_cost += cost_basis
+                    
+                    # Add dividends
+                    total_dividends += position.total_dividends
+                    
+            return {
                 'total_value': total_value,
                 'total_cost': total_cost,
-                'unrealized_pl': unrealized_pl,
-                'percentage_return': percentage_return,
-                'position_count': position_count,
-                'dividend_income': dividend_income,
-                'dividend_yield': dividend_yield
+                'total_dividends': total_dividends,
+                'unrealized_pl': total_value - total_cost,
+                'total_return': total_value + total_dividends - total_cost
             }
-            
-            return summary
         except Exception as e:
-            logger.error(f"Error creating portfolio summary: {e}")
-            # Return empty summary with zeros
+            logger.error(f"Error getting portfolio summary: {e}")
             return {
                 'total_value': 0.0,
                 'total_cost': 0.0,
+                'total_dividends': 0.0,
                 'unrealized_pl': 0.0,
-                'percentage_return': 0.0,
-                'position_count': 0,
-                'dividend_income': 0.0,
-                'dividend_yield': 0.0
+                'total_return': 0.0
             }
         
     def get_position_breakdown(self, currency: str = 'EUR', evaluation_date: Optional[date] = None) -> pd.DataFrame:
@@ -769,296 +633,82 @@ class Controller:
     def get_historical_value(self, start_date: date, end_date: Optional[date] = None, 
                            currency: str = 'EUR', interval: str = 'daily') -> pd.DataFrame:
         """
-        Get historical portfolio value over a date range
+        Get historical portfolio value
         
         Args:
-            start_date: Start date for historical data
-            end_date: End date for historical data (default: today)
-            currency: Target currency code (default: EUR)
-            interval: Data interval (daily, weekly, monthly) (default: daily)
+            start_date: Start date
+            end_date: End date (defaults to today)
+            currency: Currency to convert values to
+            interval: Data interval ('daily', 'weekly', 'monthly')
             
         Returns:
-            DataFrame with historical value data
-            
-        Raises:
-            ValueError: If historical value cannot be calculated
+            DataFrame with historical values
         """
-        if not isinstance(start_date, date):
-            raise TypeError(f"Start date must be a date object, got {type(start_date)}")
-            
-        if end_date is None:
-            end_date = date.today()
-        elif not isinstance(end_date, date):
-            raise TypeError(f"End date must be a date object, got {type(end_date)}")
-            
-        if start_date > end_date:
-            raise ValueError(f"Start date ({start_date}) cannot be after end date ({end_date})")
-            
-        if not currency or not isinstance(currency, str):
-            raise ValueError("Currency must be a non-empty string")
-            
-        if interval not in ['daily', 'weekly', 'monthly']:
-            raise ValueError(f"Invalid interval: {interval}")
-            
         try:
-            # Determine frequency for date range
-            freq = 'D'  # daily
-            if interval == 'weekly':
-                freq = 'W'
-            elif interval == 'monthly':
-                freq = 'M'
+            if not end_date:
+                end_date = date.today()
                 
+            # Get all positions
+            positions = self.portfolio.get_positions()
+            
             # Create date range
-            date_range = pd.date_range(start=start_date, end=end_date, freq=freq)
+            date_range = pd.date_range(start=start_date, end=end_date, freq='D')
             
-            # Get all transactions sorted by date
-            all_transactions = self.portfolio.get_transaction_history()
-            all_transactions.sort(key=lambda x: x.date)
+            # Initialize DataFrame
+            df = pd.DataFrame(index=date_range)
+            df.index.name = 'date'
             
-            # Find the earliest transaction date
-            earliest_transaction_date = None
-            if all_transactions:
-                earliest_transaction_date = min(t.date for t in all_transactions)
-                logger.info(f"Earliest transaction date: {earliest_transaction_date}")
-            
-            # Create DataFrame
-            data = []
-            
-            # For each date in the range, reconstruct the portfolio as it was on that date
-            for d in date_range:
-                eval_date = d.date()
+            # Calculate value for each date
+            for date_val in date_range:
+                date_val = date_val.date()
+                total_value = 0.0
                 
-                # Skip dates before the first transaction
-                if earliest_transaction_date and eval_date < earliest_transaction_date:
-                    data.append({
-                        'date': eval_date,
-                        'value': 0.0,
-                        'cost_basis': 0.0,
-                        'unrealized_pl': 0.0
-                    })
-                    continue
-                
-                try:
-                    # Create a temporary portfolio with transactions up to this date
-                    temp_portfolio = self._create_portfolio_at_date(eval_date)
+                for position in positions:
+                    # Get price for date
+                    price_data = db_manager.get_market_data_at_date(
+                        ticker=position.ticker,
+                        date_val=date_val
+                    )
                     
-                    # Skip if there are no positions in the portfolio at this date
-                    if not temp_portfolio.positions:
-                        data.append({
-                            'date': eval_date,
-                            'value': 0.0,
-                            'cost_basis': 0.0,
-                            'unrealized_pl': 0.0
-                        })
-                        continue
-                    
-                    # Calculate portfolio value, cost basis, and unrealized P/L
-                    value = temp_portfolio.get_value(currency, eval_date)
-                    cost_basis = temp_portfolio.get_gross_purchase_price(currency)
-                    unrealized_pl = temp_portfolio.get_unrealized_pl(currency, eval_date)
-                    
-                    data.append({
-                        'date': eval_date,
-                        'value': value,
-                        'cost_basis': cost_basis,
-                        'unrealized_pl': unrealized_pl
-                    })
-                    
-                    # Log progress periodically
-                    if len(data) % 30 == 0:
-                        logger.info(f"Processed {len(data)} dates for historical value calculation")
+                    if price_data:
+                        # Convert price to target currency if needed
+                        if price_data['currency'] != currency:
+                            exchange_rate = db_manager.get_exchange_rate(
+                                from_currency=price_data['currency'],
+                                to_currency=currency,
+                                date=date_val
+                            )
+                            if exchange_rate:
+                                price = price_data['close_price'] * exchange_rate
+                            else:
+                                # Try to find closest date with exchange rate
+                                closest_data = db_manager.find_closest_date_data(
+                                    'exchange_rates',
+                                    f"{price_data['currency']}_{currency}",
+                                    date_val
+                                )
+                                if closest_data:
+                                    price = price_data['close_price'] * closest_data[1]
+                                else:
+                                    continue
+                        else:
+                            price = price_data['close_price']
+                            
+                        # Add position value
+                        total_value += position.amount * price
                         
-                except Exception as e:
-                    logger.warning(f"Error calculating portfolio value for {eval_date}: {e}")
-                    # Add zero values for this date
-                    data.append({
-                        'date': eval_date,
-                        'value': 0.0,
-                        'cost_basis': 0.0,
-                        'unrealized_pl': 0.0
-                    })
-                    continue
-                    
-            # Create DataFrame
-            df = pd.DataFrame(data)
-            
-            if df.empty:
-                return pd.DataFrame(columns=['date', 'value', 'cost_basis', 'unrealized_pl'])
+                df.loc[date_val, 'value'] = total_value
                 
-            # Ensure correct data types
-            df['value'] = df['value'].astype(float)
-            df['cost_basis'] = df['cost_basis'].astype(float)
-            df['unrealized_pl'] = df['unrealized_pl'].astype(float)
-            
-            # Calculate return
-            if len(df) > 0:
-                # Find the first non-zero value
-                non_zero_values = df[df['value'] > 0]
-                if not non_zero_values.empty:
-                    first_value = non_zero_values['value'].iloc[0]
-                    if first_value > 0:
-                        # Calculate return only for dates with non-zero values
-                        df.loc[df['value'] > 0, 'return'] = (df.loc[df['value'] > 0, 'value'] / first_value) - 1
-                        # Set return to 0 for dates with zero values
-                        df.loc[df['value'] <= 0, 'return'] = 0.0
-                    else:
-                        df['return'] = 0.0
-                else:
-                    df['return'] = 0.0
-                    
+            # Resample to requested interval
+            if interval == 'weekly':
+                df = df.resample('W').last()
+            elif interval == 'monthly':
+                df = df.resample('M').last()
+                
             return df
         except Exception as e:
-            logger.error(f"Error calculating historical value: {e}")
-            # Return empty DataFrame with correct columns
-            return pd.DataFrame(columns=['date', 'value', 'cost_basis', 'unrealized_pl', 'return'])
-            
-    def _create_portfolio_at_date(self, evaluation_date: date) -> 'Portfolio':
-        """
-        Create a portfolio with all transactions up to the given date
-        
-        Args:
-            evaluation_date: The date to reconstruct the portfolio for
-            
-        Returns:
-            A Portfolio object with all transactions up to the given date
-        """
-        from backend.portfolio import Portfolio
-        
-        # Create a new portfolio
-        temp_portfolio = Portfolio()
-        
-        # Get all transactions up to the evaluation date
-        transactions = self.portfolio.get_transaction_history(
-            end_date=evaluation_date
-        )
-        
-        # Sort transactions by date
-        transactions.sort(key=lambda x: x.date)
-        
-        # Add each transaction to the portfolio
-        for transaction in transactions:
-            try:
-                # Skip transactions with future dates
-                if transaction.date > evaluation_date:
-                    continue
-                    
-                # For buy/sell transactions, use the transaction method
-                if transaction.type in ["buy", "sell"]:
-                    temp_portfolio.transaction(
-                        transaction.type,
-                        transaction.stock,
-                        transaction.amount,
-                        transaction.price.amount,
-                        transaction.price.currency,
-                        transaction.date,
-                        transaction.cost.amount if hasattr(transaction, 'cost') else None
-                    )
-                
-                # Also add to transactions list for completeness
-                temp_portfolio.transactions.append(transaction)
-                
-                # Log for debugging
-                logger.debug(f"Added {transaction.type} transaction for {transaction.stock.ticker} on {transaction.date} to temporary portfolio")
-            except Exception as e:
-                logger.warning(f"Error adding transaction to temporary portfolio: {e}")
-                continue
-                
-        # Add dividends up to the evaluation date
-        dividends = self.portfolio.get_dividend_history(
-            end_date=evaluation_date
-        )
-        
-        # Add each dividend to the portfolio
-        for dividend in dividends:
-            if dividend.date <= evaluation_date:
-                temp_portfolio.dividends.append(dividend)
-        
-        # Log the portfolio state for debugging
-        logger.debug(f"Temporary portfolio at {evaluation_date} has {len(temp_portfolio.positions)} positions")
-        
-        # Ensure market data is available for each position at the evaluation date
-        missing_market_data = False
-        for ticker, position in temp_portfolio.positions.items():
-            try:
-                # Get market data for this ticker at the evaluation date
-                market_data = db_manager.get_market_data_at_date(ticker, evaluation_date)
-                
-                if not market_data:
-                    # Try to get the closest market data before the evaluation date
-                    market_data = db_manager.get_closest_market_data_before(ticker, evaluation_date)
-                
-                if market_data:
-                    logger.debug(f"Found market data for {ticker} at {market_data['date']}: {market_data['close_price']} {market_data['currency']}")
-                else:
-                    # If no market data is available, use the purchase price as a fallback
-                    logger.warning(f"No market data found for {ticker} at or before {evaluation_date}, using purchase price as fallback")
-                    missing_market_data = True
-            except Exception as e:
-                logger.warning(f"Error getting market data for {ticker} at {evaluation_date}: {e}")
-                missing_market_data = True
-        
-        # If market data is missing for any position, the portfolio value might be inaccurate
-        if missing_market_data:
-            logger.warning(f"Portfolio value at {evaluation_date} may be inaccurate due to missing market data")
-        
-        return temp_portfolio
-        
-    def get_portfolio_performance(self, start_date, end_date=None, currency: str = 'EUR') -> pd.DataFrame:
-        """
-        Get portfolio performance data for the specified date range
-        
-        Args:
-            start_date: Start date for performance data (string or date object)
-            end_date: End date for performance data (string or date object, default: today)
-            currency: Target currency code (default: EUR)
-            
-        Returns:
-            DataFrame with portfolio performance data including normalized values
-        """
-        # Convert string dates to date objects if needed
-        if isinstance(start_date, str):
-            start_date = date.fromisoformat(start_date)
-        if end_date is not None and isinstance(end_date, str):
-            end_date = date.fromisoformat(end_date)
-            
-        # Get historical value data
-        df = self.get_historical_value(start_date, end_date, currency)
-        
-        # Add normalized value (starting at 100)
-        # Find the first non-zero value to use as the base for normalization
-        non_zero_values = df[df['value'] > 0]
-        if not non_zero_values.empty:
-            first_value = non_zero_values['value'].iloc[0]
-            if first_value > 0:
-                # Calculate normalized value only for dates with non-zero values
-                df.loc[df['value'] > 0, 'normalized_value'] = df.loc[df['value'] > 0, 'value'] / first_value * 100
-                
-                # Cap normalized values to a reasonable range to prevent extreme values
-                # This prevents outliers from distorting the graph
-                max_normalized_value = 1000  # Cap at 10x the starting value
-                df.loc[df['normalized_value'] > max_normalized_value, 'normalized_value'] = max_normalized_value
-                
-                # Set normalized value to the previous value for dates with zero values
-                # This ensures the line doesn't drop to zero when there are no positions
-                last_normalized = 100.0
-                for idx, row in df.iterrows():
-                    if row['value'] <= 0:
-                        df.at[idx, 'normalized_value'] = last_normalized
-                    else:
-                        last_normalized = df.at[idx, 'normalized_value']
-                        
-                # Log any extreme values for debugging
-                extreme_values = df[df['normalized_value'] == max_normalized_value]
-                if not extreme_values.empty:
-                    logger.warning(f"Found {len(extreme_values)} extreme normalized values that were capped at {max_normalized_value}")
-                    for _, row in extreme_values.iterrows():
-                        logger.warning(f"Extreme value on {row['date']}: {row['value']} (normalized would be {row['value'] / first_value * 100})")
-            else:
-                df['normalized_value'] = 100
-        else:
-            df['normalized_value'] = 100
-            
-        return df
+            logger.error(f"Error getting historical value: {e}")
+            return pd.DataFrame()
         
     def get_performance_metrics(self, currency: str = 'EUR', 
                               evaluation_date: Optional[date] = None) -> Dict[str, float]:
@@ -1183,7 +833,7 @@ class Controller:
         
     def _calculate_realized_pl(self, currency: str) -> float:
         """
-        Calculate realized profit/loss from sell transactions
+        Calculate realized profit/loss in the specified currency
         
         Args:
             currency: Target currency code
@@ -1195,93 +845,13 @@ class Controller:
             raise ValueError("Currency must be a non-empty string")
             
         try:
-            # Get all sell transactions
-            sell_transactions = self.portfolio.get_transaction_history(transaction_type="sell")
+            # Use the portfolio's method to get realized P/L transactions
+            realized_pl_transactions = self.portfolio.get_realized_pl_transactions(currency)
             
-            if not sell_transactions:
-                return 0.0
-                
-            # Calculate realized P/L
-            realized_pl = 0.0
+            # Sum up all the P/L values
+            total_realized_pl = sum(transaction.get('pl', 0) for transaction in realized_pl_transactions)
             
-            # Group transactions by ticker
-            ticker_transactions: Dict[str, List[Dict[str, Any]]] = {}
-            
-            # First, process all buy transactions
-            buy_transactions = self.portfolio.get_transaction_history(transaction_type="buy")
-            
-            for transaction in buy_transactions:
-                ticker = transaction.stock.ticker
-                
-                if ticker not in ticker_transactions:
-                    ticker_transactions[ticker] = []
-                    
-                ticker_transactions[ticker].append({
-                    'type': 'buy',
-                    'date': transaction.date,
-                    'amount': transaction.amount,
-                    'price': transaction.price.get_money_amount(currency),
-                    'cost': transaction.cost.get_money_amount(currency)
-                })
-                
-            # Sort buy transactions by date (FIFO)
-            for ticker in ticker_transactions:
-                ticker_transactions[ticker].sort(key=lambda x: x['date'])
-                
-            # Process sell transactions
-            for transaction in sell_transactions:
-                ticker = transaction.stock.ticker
-                
-                if ticker not in ticker_transactions:
-                    logger.warning(f"No buy transactions found for {ticker}")
-                    continue
-                    
-                sell_amount = transaction.amount
-                sell_price = transaction.price.get_money_amount(currency)
-                sell_cost = transaction.cost.get_money_amount(currency)
-                
-                # Match sell with buy transactions (FIFO)
-                remaining_sell = sell_amount
-                buy_index = 0
-                
-                while remaining_sell > 0 and buy_index < len(ticker_transactions[ticker]):
-                    buy_transaction = ticker_transactions[ticker][buy_index]
-                    
-                    if buy_transaction['type'] != 'buy':
-                        buy_index += 1
-                        continue
-                        
-                    buy_amount = buy_transaction['amount']
-                    buy_price = buy_transaction['price']
-                    buy_cost = buy_transaction['cost']
-                    
-                    if buy_amount <= 0:
-                        buy_index += 1
-                        continue
-                        
-                    # Calculate amount to match
-                    match_amount = min(remaining_sell, buy_amount)
-                    
-                    # Calculate P/L for this match
-                    buy_value = match_amount * buy_price
-                    sell_value = match_amount * sell_price
-                    
-                    # Adjust for costs (proportional)
-                    buy_cost_portion = (match_amount / buy_amount) * buy_cost
-                    sell_cost_portion = (match_amount / sell_amount) * sell_cost
-                    
-                    # Calculate P/L
-                    match_pl = sell_value - buy_value - buy_cost_portion - sell_cost_portion
-                    realized_pl += match_pl
-                    
-                    # Update remaining amounts
-                    remaining_sell -= match_amount
-                    ticker_transactions[ticker][buy_index]['amount'] -= match_amount
-                    
-                    if ticker_transactions[ticker][buy_index]['amount'] <= 0:
-                        buy_index += 1
-                        
-            return realized_pl
+            return total_realized_pl
         except Exception as e:
             logger.error(f"Error calculating realized P/L: {e}")
             return 0.0  # Return 0 instead of raising an error
@@ -1439,12 +1009,12 @@ class Controller:
             )
             
             # Initialize benchmark comparison
-            self.benchmark_comparison = BenchmarkComparison(historical_value)
+            self.benchmark_comparison = BenchmarkComparison(historical_value, self.db_manager)
             
             # Add default benchmarks
-            self.benchmark_comparison.add_benchmark(NasdaqBenchmark())
-            self.benchmark_comparison.add_benchmark(SP500Benchmark())
-            self.benchmark_comparison.add_benchmark(DAX30Benchmark())
+            self.benchmark_comparison.add_benchmark(NasdaqBenchmark(self.db_manager))
+            self.benchmark_comparison.add_benchmark(SP500Benchmark(self.db_manager))
+            self.benchmark_comparison.add_benchmark(DAX30Benchmark(self.db_manager))
         except Exception as e:
             logger.error(f"Error initializing benchmark comparison: {e}")
             raise ValueError(f"Failed to initialize benchmark comparison: {e}") from e
@@ -1538,3 +1108,19 @@ class Controller:
     def __repr__(self) -> str:
         """Detailed representation of controller"""
         return f"Controller(portfolio={self.portfolio})"
+
+    def get_positions_data_for_table(self) -> list[dict]:
+        """Returns a list of dictionaries with position data for the frontend table."""
+        try:
+            return self.db_manager.get_positions_data_for_table()
+        except Exception as e:
+            logger.error(f"Error loading positions table: {e}", exc_info=True)
+            return []
+
+    def get_watchlist_data_for_table(self) -> list[dict]:
+        """Returns a list of dictionaries with watchlist data for the frontend table."""
+        try:
+            return self.db_manager.get_watchlist_data_for_table()
+        except Exception as e:
+            logger.error("Error loading watchlist table", exc_info=True)
+            return []
