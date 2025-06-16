@@ -1,5 +1,5 @@
 import logging
-from dash import Input, Output, callback
+from dash import Input, Output, callback, State
 import dash
 from backend.controller import Controller
 
@@ -23,6 +23,32 @@ def register_callbacks(app, controller: Controller):
         except Exception as e:
             logging.error(f"Error updating positions table: {e}")
             return []
+
+    @app.callback(
+        Output("positions-table", "data", allow_duplicate=True),
+        Input("positions-table", "data_timestamp"),
+        State("positions-table", "data"),
+        prevent_initial_call=True
+    )
+    def update_target_price(timestamp, rows):
+        """Handle target price updates when user edits the table."""
+        if not rows:
+            return dash.no_update
+            
+        try:
+            # Update target prices in the database
+            for row in rows:
+                ticker = row.get('ticker')
+                target_price = row.get('target_price')
+                
+                if ticker and target_price is not None:
+                    controller.update_stock_target_price(ticker, float(target_price))
+            
+            # Return the updated data
+            return rows
+        except Exception as e:
+            logging.error(f"Error updating target price: {e}")
+            return dash.no_update
 
 # This function is kept for backward compatibility but is no longer used
 def get_sector(ticker):

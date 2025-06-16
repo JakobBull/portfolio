@@ -149,7 +149,7 @@ def create_layout():
                                         {'name': 'Unrealized P/L', 'id': 'unrealized_pl', 'type': 'numeric', 'format': {'specifier': '$.2f', 'locale': {'symbol': ['€', '']}}},
                                         {'name': 'Return %', 'id': 'return_pct', 'type': 'numeric', 'format': {'specifier': '.2%'}},
                                         {'name': 'Weight %', 'id': 'weight_pct', 'type': 'numeric', 'format': {'specifier': '.2%'}},
-                                        {'name': 'Target', 'id': 'target_price', 'type': 'numeric', 'format': {'specifier': '$.2f', 'locale': {'symbol': ['€', '']}}},
+                                        {'name': 'Target', 'id': 'target_price', 'type': 'numeric', 'format': {'specifier': '$.2f', 'locale': {'symbol': ['€', '']}}, 'editable': True},
                                         {'name': 'Dividend Yield', 'id': 'dividend_yield', 'type': 'numeric', 'format': {'specifier': '.2%'}},
                                     ],
                                     data=[],

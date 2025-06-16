@@ -36,10 +36,12 @@ class Stock(Base):
     currency = Column(String, default='USD')
     sector = Column(String)
     country = Column(String)
+    target_price = Column(Float, default=None)
     
     # Relationships
     prices = relationship("StockPrice", back_populates="stock", cascade="all, delete-orphan")
     transactions = relationship("Transaction", back_populates="stock", cascade="all, delete-orphan")
+    dividends = relationship("Dividend", back_populates="stock", cascade="all, delete-orphan")
     watchlist_item = relationship("Watchlist", back_populates="stock", uselist=False, cascade="all, delete-orphan")
 
 class StockPrice(Base):
@@ -82,6 +84,25 @@ class Transaction(Base):
 class Dividend(Transaction):
     """Dividend model, inherits from Transaction"""
     pass
+
+class Dividend(Base):
+    """Dividend payments table"""
+    __tablename__ = 'dividends'
+    
+    id = Column(Integer, primary_key=True)
+    ticker = Column(String, ForeignKey('stocks.ticker'), nullable=False)
+    date = Column(Date, nullable=False)  # Ex-dividend date
+    amount_per_share = Column(Float, nullable=False)
+    tax_withheld = Column(Float, default=0.0)
+    currency = Column(String, nullable=False, default='USD')
+    
+    # Relationships
+    stock = relationship("Stock", back_populates="dividends")
+    
+    __table_args__ = (
+        UniqueConstraint('ticker', 'date', name='unique_dividend_per_stock_per_date'),
+        {'sqlite_autoincrement': True},
+    )
 
 class Watchlist(Base):
     """Watchlist model for storing stocks to watch"""
@@ -156,6 +177,15 @@ class DatabaseManager:
         """Get stock information"""
         with self.session_scope() as session:
             return session.query(Stock).filter(Stock.ticker == ticker).first()
+
+    def update_stock_target_price(self, ticker: str, target_price: float) -> bool:
+        """Update the target price for a stock"""
+        with self.session_scope() as session:
+            stock = session.query(Stock).filter(Stock.ticker == ticker).first()
+            if stock:
+                stock.target_price = target_price
+                return True
+            return False
 
     def get_all_stock_tickers(self) -> List[str]:
         """Get all stock tickers from the database."""
@@ -257,14 +287,14 @@ class DatabaseManager:
     
     def get_portfolio_value_at_date(self, target_date: datetime.date, currency: str = 'USD') -> float:
         """
-        Calculate total portfolio value at a specific date.
+        Calculate market value of portfolio positions at a specific date.
         
         Args:
             target_date: Date to calculate value for
             currency: Currency to return value in
             
         Returns:
-            Total portfolio value
+            Total market value of stock positions (excludes cash/dividends)
         """
         positions = self.get_portfolio_positions_at_date(target_date)
         total_value = 0.0
@@ -276,6 +306,21 @@ class DatabaseManager:
                 total_value += shares * price
         
         return total_value
+    
+    def get_total_return_at_date(self, target_date: datetime.date, currency: str = 'USD') -> float:
+        """
+        Calculate total return (portfolio value + dividends received) at a specific date.
+        
+        Args:
+            target_date: Date to calculate total return for
+            currency: Currency to return value in
+            
+        Returns:
+            Total return (market value + cumulative dividends)
+        """
+        market_value = self.get_portfolio_value_at_date(target_date, currency)
+        dividend_income = self.get_dividend_income_up_to_date(target_date, currency)
+        return market_value + dividend_income
     
     def get_portfolio_values_over_time(self, start_date: datetime.date, end_date: datetime.date, 
                                      currency: str = 'USD') -> pd.Series:
@@ -296,6 +341,29 @@ class DatabaseManager:
         for date in date_range:
             date_obj = date.date()
             value = self.get_portfolio_value_at_date(date_obj, currency)
+            values.append(value)
+        
+        return pd.Series(values, index=date_range)
+    
+    def get_total_return_values_over_time(self, start_date: datetime.date, end_date: datetime.date, 
+                                        currency: str = 'USD') -> pd.Series:
+        """
+        Calculate total return values (portfolio + dividends) over a date range.
+        
+        Args:
+            start_date: Start date
+            end_date: End date
+            currency: Currency to return values in
+            
+        Returns:
+            Pandas Series with dates as index and total return values
+        """
+        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+        values = []
+        
+        for date in date_range:
+            date_obj = date.date()
+            value = self.get_total_return_at_date(date_obj, currency)
             values.append(value)
         
         return pd.Series(values, index=date_range)
@@ -397,7 +465,7 @@ class DatabaseManager:
         positions_data = []
         total_portfolio_value = 0.0
         
-        # First pass: calculate individual position values
+        # First pass: calculate individual position values for correct portfolio weights
         position_values = {}
         for ticker, shares in positions.items():
             latest_price_info = self.get_latest_stock_price(ticker)
@@ -406,7 +474,7 @@ class DatabaseManager:
             position_values[ticker] = market_value
             total_portfolio_value += market_value
         
-        # Second pass: create position data with weights
+        # Second pass: create position data with corrected calculations
         for ticker, shares in positions.items():
             stock = self.get_stock(ticker)
             if not stock:
@@ -418,9 +486,17 @@ class DatabaseManager:
             market_value = position_values[ticker]
             cost_basis = self.get_position_cost_basis(ticker, target_date)
             
+            # Calculate unrealized P/L (without dividends for this field)
             unrealized_pl = market_value - cost_basis
-            return_pct = (unrealized_pl / cost_basis) * 100 if cost_basis > 0 else 0
-            weight_pct = (market_value / total_portfolio_value) * 100 if total_portfolio_value > 0 else 0
+            
+            # Calculate time-weighted return percentage
+            return_pct = self.get_time_weighted_return_for_ticker(ticker, target_date, current_price)
+            
+            # Calculate portfolio weight as decimal (AG Grid will multiply by 100 for %)
+            weight_pct = (market_value / total_portfolio_value) if total_portfolio_value > 0 else 0
+            
+            # Calculate dividend yield based on last 12 months dividends vs current price
+            dividend_yield = self.get_dividend_yield_for_ticker(ticker, target_date)
             
             positions_data.append({
                 'ticker': ticker,
@@ -432,8 +508,8 @@ class DatabaseManager:
                 'unrealized_pl': unrealized_pl,
                 'return_pct': return_pct,
                 'weight_pct': weight_pct,
-                'target_price': None,  # This would need to be stored separately if needed
-                'dividend_yield': 0,  # This would need to be calculated separately
+                'target_price': stock.target_price,
+                'dividend_yield': dividend_yield,
                 'currency': stock.currency,
                 'sector': stock.sector,
                 'country': stock.country
@@ -512,6 +588,304 @@ class DatabaseManager:
                 session.delete(item)
                 return True
             return False
+
+    # Dividend operations
+    def add_dividend(self, ticker: str, date: datetime.date, amount_per_share: float, 
+                    tax_withheld: float = 0.0, currency: str = 'USD') -> Dividend | None:
+        """Add or update a dividend record"""
+        with self.session_scope() as session:
+            dividend = session.query(Dividend).filter_by(ticker=ticker, date=date).first()
+            if dividend:
+                dividend.amount_per_share = amount_per_share
+                dividend.tax_withheld = tax_withheld
+                dividend.currency = currency
+            else:
+                dividend = Dividend(
+                    ticker=ticker,
+                    date=date,
+                    amount_per_share=amount_per_share,
+                    tax_withheld=tax_withheld,
+                    currency=currency
+                )
+                session.add(dividend)
+            session.flush()
+            session.refresh(dividend)
+            return dividend
+
+    def get_latest_dividend_date(self, ticker: str) -> datetime.date | None:
+        """Get the latest dividend date for a ticker"""
+        with self.session_scope() as session:
+            latest_dividend = session.query(Dividend).filter_by(ticker=ticker).order_by(Dividend.date.desc()).first()
+            return latest_dividend.date if latest_dividend else None
+
+    def get_all_dividends(self, ticker: str = None) -> List[Dividend]:
+        """Get all dividends, optionally filtered by ticker"""
+        with self.session_scope() as session:
+            query = session.query(Dividend)
+            if ticker:
+                query = query.filter(Dividend.ticker == ticker)
+            return query.order_by(Dividend.date).all()
+
+    def get_dividend_income_up_to_date(self, target_date: datetime.date, currency: str = 'USD') -> float:
+        """
+        Calculate total dividend income received up to a specific date.
+        
+        Args:
+            target_date: Date to calculate dividend income up to
+            currency: Currency to return income in
+            
+        Returns:
+            Total dividend income received up to the target date
+        """
+        with self.session_scope() as session:
+            # Get all dividends up to target date
+            dividends = (session.query(Dividend)
+                        .filter(Dividend.date <= target_date)
+                        .all())
+            
+            total_dividend_income = 0.0
+            
+            for dividend in dividends:
+                # Get shares held at the dividend ex-date to calculate total dividend received
+                shares_held = self.get_shares_held_at_date(dividend.ticker, dividend.date)
+                if shares_held > 0:
+                    dividend_received = dividend.amount_per_share * shares_held
+                    # TODO: Add currency conversion if needed
+                    total_dividend_income += dividend_received
+            
+            return total_dividend_income
+
+    def get_shares_held_at_date(self, ticker: str, target_date: datetime.date) -> float:
+        """
+        Calculate shares held for a specific ticker at a specific date.
+        
+        Args:
+            ticker: Stock ticker
+            target_date: Date to calculate shares held for
+            
+        Returns:
+            Number of shares held at the target date
+        """
+        with self.session_scope() as session:
+            # Get all buy and sell transactions for this ticker up to target date
+            transactions = (session.query(Transaction)
+                          .filter(Transaction.ticker == ticker)
+                          .filter(Transaction.date <= target_date)
+                          .filter(Transaction.type.in_(['buy', 'sell']))
+                          .order_by(Transaction.date, Transaction.id)
+                          .all())
+            
+            shares_held = 0.0
+            for transaction in transactions:
+                if transaction.type == 'buy':
+                    shares_held += transaction.amount
+                elif transaction.type == 'sell':
+                    shares_held -= transaction.amount
+            
+            return max(0.0, shares_held)  # Don't return negative shares
+
+    def get_dividend_income_for_ticker_up_to_date(self, ticker: str, target_date: datetime.date, currency: str = 'USD') -> float:
+        """
+        Calculate total dividend income received for a specific ticker up to a specific date.
+        
+        Args:
+            ticker: Stock ticker
+            target_date: Date to calculate dividend income up to
+            currency: Currency to return income in
+            
+        Returns:
+            Total dividend income received for the ticker up to the target date
+        """
+        with self.session_scope() as session:
+            # Get all dividends for this ticker up to target date
+            dividends = (session.query(Dividend)
+                        .filter(Dividend.ticker == ticker)
+                        .filter(Dividend.date <= target_date)
+                        .all())
+            
+            total_dividend_income = 0.0
+            
+            for dividend in dividends:
+                # Get shares held at the dividend ex-date to calculate total dividend received
+                shares_held = self.get_shares_held_at_date(ticker, dividend.date)
+                if shares_held > 0:
+                    dividend_received = dividend.amount_per_share * shares_held
+                    # TODO: Add currency conversion if needed
+                    total_dividend_income += dividend_received
+            
+            return total_dividend_income
+
+    def get_time_weighted_return_for_ticker(self, ticker: str, target_date: datetime.date, current_price: float) -> float:
+        """
+        Calculate time-weighted return for a ticker, considering individual purchase timing.
+        Uses proper CAGR (Compound Annual Growth Rate) formula.
+        Only considers shares that are still held (uses FIFO to determine which purchases are still active).
+        
+        Args:
+            ticker: Stock ticker
+            target_date: Date to calculate return for
+            current_price: Current stock price
+            
+        Returns:
+            Annualized return percentage weighted by purchase values
+        """
+        with self.session_scope() as session:
+            # Get all buy and sell transactions for this ticker up to target date
+            transactions = (session.query(Transaction)
+                          .filter(Transaction.ticker == ticker)
+                          .filter(Transaction.type.in_(['buy', 'sell']))
+                          .filter(Transaction.date <= target_date)
+                          .order_by(Transaction.date, Transaction.id)
+                          .all())
+            
+            if not transactions or current_price <= 0:
+                return 0.0
+            
+            # Track remaining shares from each purchase using FIFO
+            active_purchases = []  # List of dicts with purchase info
+            
+            for transaction in transactions:
+                if transaction.type == 'buy':
+                    # Include transaction costs in the cost basis for consistency
+                    cost_per_share = (transaction.price * transaction.amount + transaction.cost) / transaction.amount
+                    active_purchases.append({
+                        'shares': transaction.amount,
+                        'price': transaction.price,
+                        'cost_per_share': cost_per_share,  # This includes transaction costs
+                        'date': transaction.date,
+                        'value': transaction.amount * cost_per_share  # Use cost_per_share for weighting
+                    })
+                elif transaction.type == 'sell':
+                    # Remove sold shares using FIFO
+                    shares_to_sell = transaction.amount
+                    while shares_to_sell > 0 and active_purchases:
+                        oldest_purchase = active_purchases[0]
+                        if oldest_purchase['shares'] <= shares_to_sell:
+                            # Sell entire oldest purchase
+                            shares_to_sell -= oldest_purchase['shares']
+                            active_purchases.pop(0)
+                        else:
+                            # Partially sell oldest purchase
+                            old_shares = oldest_purchase['shares']
+                            oldest_purchase['shares'] -= shares_to_sell
+                            # Adjust value proportionally using cost_per_share
+                            oldest_purchase['value'] = oldest_purchase['shares'] * oldest_purchase['cost_per_share']
+                            shares_to_sell = 0
+            
+            if not active_purchases:
+                return 0.0
+            
+            # Calculate weighted return for remaining purchases
+            total_weighted_return = 0.0
+            total_weight = 0.0
+            
+            for purchase in active_purchases:
+                # Calculate years held for this specific purchase
+                days_held = (target_date - purchase['date']).days
+                years_held = max(days_held / 365.25, 1/365.25)  # Minimum 1 day to avoid division issues
+                
+                # Calculate total return multiple for this specific purchase (using cost_per_share that includes fees)
+                price_multiple = current_price / purchase['cost_per_share']
+                
+                # Calculate CAGR (Compound Annual Growth Rate)
+                if price_multiple > 0 and years_held > 0:
+                    annualized_return = (price_multiple ** (1 / years_held)) - 1
+                else:
+                    annualized_return = 0.0
+                
+                # Weight by the remaining value of this purchase
+                weighted_return = annualized_return * purchase['value']
+                
+                total_weighted_return += weighted_return
+                total_weight += purchase['value']
+            
+            if total_weight == 0:
+                return 0.0
+            
+            # Return weighted average annualized return as decimal (AG Grid will multiply by 100 for %)
+            return (total_weighted_return / total_weight)
+
+    def get_earliest_purchase_date(self, ticker: str) -> datetime.date | None:
+        """
+        Get the earliest purchase date for a ticker.
+        
+        Args:
+            ticker: Stock ticker
+            
+        Returns:
+            Earliest purchase date or None if no purchases found
+        """
+        with self.session_scope() as session:
+            earliest_transaction = (session.query(Transaction)
+                                   .filter(Transaction.ticker == ticker)
+                                   .filter(Transaction.type == 'buy')
+                                   .order_by(Transaction.date)
+                                   .first())
+            
+            return earliest_transaction.date if earliest_transaction else None
+
+    def get_years_held(self, ticker: str, target_date: datetime.date) -> float:
+        """
+        Calculate the number of years a position has been held.
+        
+        Args:
+            ticker: Stock ticker
+            target_date: Date to calculate years held until
+            
+        Returns:
+            Number of years held (as decimal)
+        """
+        earliest_purchase = self.get_earliest_purchase_date(ticker)
+        if not earliest_purchase:
+            return 0.0
+        
+        days_held = (target_date - earliest_purchase).days
+        return max(days_held / 365.25, 0.1)  # Minimum 0.1 years to avoid division by zero
+
+    def get_dividend_yield_for_ticker(self, ticker: str, target_date: datetime.date = None) -> float:
+        """
+        Calculate dividend yield for a ticker based on dividends over the past 12 months.
+        
+        Args:
+            ticker: Stock ticker
+            target_date: Date to calculate yield for (defaults to today)
+            
+        Returns:
+            Dividend yield as a percentage
+        """
+        if target_date is None:
+            target_date = datetime.date.today()
+        
+        # Calculate date 12 months ago
+        twelve_months_ago = target_date - datetime.timedelta(days=365)
+        
+        with self.session_scope() as session:
+            # Get dividends from the past 12 months
+            dividends = (session.query(Dividend)
+                        .filter(Dividend.ticker == ticker)
+                        .filter(Dividend.date > twelve_months_ago)
+                        .filter(Dividend.date <= target_date)
+                        .all())
+            
+            if not dividends:
+                return 0.0
+            
+            # Calculate total dividend per share over the past 12 months
+            total_dividend_per_share = sum(dividend.amount_per_share for dividend in dividends)
+            
+            # Get the current stock price (use target_date price if available, otherwise latest)
+            current_price = self.get_stock_price_at_date(ticker, target_date)
+            if not current_price or current_price <= 0:
+                # Fallback to latest price if no price available for target date
+                latest_price_info = self.get_latest_stock_price(ticker)
+                if not latest_price_info or latest_price_info.price <= 0:
+                    return 0.0
+                current_price = latest_price_info.price
+            
+            # Calculate dividend yield as decimal (AG Grid will multiply by 100 for %)
+            dividend_yield = (total_dividend_per_share / current_price)
+            
+            return dividend_yield
 
 # Singleton instance of the database manager
 db_manager = DatabaseManager() 

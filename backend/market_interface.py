@@ -360,6 +360,95 @@ class MarketInterface:
         logger.info(f"Successfully converted prices to {target_currency} for {len(tickers)} tickers")
         return converted_data
 
+    def get_historical_dividends_for_tickers(self, tickers: list[str], start_date: date, end_date: date, target_currency: str | None = None) -> dict[str, pd.Series] | None:
+        """
+        Get historical dividends for a list of tickers with a robust retry mechanism.
+        If the batch request fails, it will attempt to download tickers individually.
+        
+        Args:
+            tickers (list[str]): List of stock ticker symbols
+            start_date (date): Start date for historical dividend data
+            end_date (date): End date for historical dividend data
+            target_currency (str, optional): Currency to convert all dividends to. If None, keeps original currencies.
+            
+        Returns:
+            dict[str, pd.Series] | None: Dictionary mapping ticker -> dividend Series, optionally converted to target currency
+        """
+        if not tickers:
+            return {}
+            
+        logger.info(f"Fetching dividend data for {len(tickers)} tickers from {start_date} to {end_date}")
+        
+        self._rate_limit()
+        
+        try:
+            # Get stock info for currency conversion if needed
+            stock_info = None
+            if target_currency:
+                stock_info = self.get_stock_info_for_tickers(tickers)
+            
+            # Fetch dividends for each ticker individually (yfinance doesn't support batch dividend fetching)
+            all_dividends = {}
+            
+            for ticker in tickers:
+                try:
+                    logger.info(f"Fetching dividends for {ticker}")
+                    self._rate_limit()
+                    
+                    stock = yf.Ticker(ticker, session=self.session)
+                    dividends = stock.dividends
+                    
+                    if dividends.empty:
+                        logger.info(f"No dividend data found for {ticker}")
+                        all_dividends[ticker] = pd.Series(dtype=float)
+                        continue
+                    
+                    # Filter by date range
+                    filtered_dividends = dividends[
+                        (dividends.index.date >= start_date) & 
+                        (dividends.index.date <= end_date)
+                    ]
+                    
+                    if filtered_dividends.empty:
+                        logger.info(f"No dividend data in date range for {ticker}")
+                        all_dividends[ticker] = pd.Series(dtype=float)
+                        continue
+                    
+                    # Convert currency if target_currency is specified
+                    if target_currency and stock_info and ticker in stock_info and stock_info[ticker]:
+                        ticker_currency = stock_info[ticker].get('currency', 'USD')
+                        
+                        if ticker_currency != target_currency:
+                            logger.info(f"Converting {ticker} dividends from {ticker_currency} to {target_currency}")
+                            converted_dividends = pd.Series(index=filtered_dividends.index, dtype=float)
+                            
+                            for date_idx, dividend_amount in filtered_dividends.items():
+                                date_for_conversion = date_idx.date() if hasattr(date_idx, 'date') else date_idx
+                                converted_amount = self.convert_currency(dividend_amount, ticker_currency, target_currency, date_for_conversion)
+                                converted_dividends[date_idx] = converted_amount
+                            
+                            all_dividends[ticker] = converted_dividends
+                        else:
+                            all_dividends[ticker] = filtered_dividends
+                    else:
+                        all_dividends[ticker] = filtered_dividends
+                    
+                    logger.info(f"Successfully fetched {len(filtered_dividends)} dividend records for {ticker}")
+                    
+                except Exception as e:
+                    logger.error(f"Error fetching dividends for {ticker}: {e}")
+                    all_dividends[ticker] = pd.Series(dtype=float)
+                
+                # Small delay between ticker requests
+                time.sleep(random.uniform(1, 2))
+            
+            logger.info(f"Successfully fetched dividend data for {len(tickers)} tickers")
+            return all_dividends
+            
+        except Exception as e:
+            logger.error(f"An error occurred during dividend data fetching: {e}")
+            return None
+
     @overload
     def get_stock_price(self, ticker: str, target_date: date, target_currency: str | None = None) -> tuple[float, str]:
         """Get stock price for a single date."""

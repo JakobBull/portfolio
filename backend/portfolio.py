@@ -156,17 +156,17 @@ class Portfolio:
 
     def get_unrealized_pl(self, currency: str, evaluation_date: Optional[date] = None) -> float:
         """
-        Calculate total unrealized profit/loss for the portfolio
+        Calculate total return profit/loss for the portfolio (market value + dividends - cost basis).
         
         Args:
             currency: Target currency code
             evaluation_date: Date for the valuation (default: today)
             
         Returns:
-            The unrealized profit/loss in the specified currency
+            The total return P/L in the specified currency (includes dividends received)
             
         Raises:
-            ValueError: If unrealized P/L cannot be calculated
+            ValueError: If total return P/L cannot be calculated
         """
         if not currency or not isinstance(currency, str):
             raise ValueError("Currency must be a non-empty string")
@@ -175,9 +175,17 @@ class Portfolio:
             evaluation_date = date.today()
             
         try:
+            from backend.database import db_manager
+            
+            # Current market value of positions
             current_value = self.get_value(currency, evaluation_date)
+            # Original cost basis
             cost_basis = self.get_gross_purchase_price(currency)
-            return current_value - cost_basis
+            # Dividend income received up to evaluation date
+            dividend_income = self.get_dividend_income(currency, end_date=evaluation_date)
+            
+            # Total Return P/L = (Current Value + Dividends) - Cost Basis
+            return current_value + dividend_income - cost_basis
         except Exception as e:
             logger.error(f"Error calculating unrealized P/L: {e}")
             raise ValueError(f"Failed to calculate unrealized P/L: {e}") from e
@@ -185,7 +193,7 @@ class Portfolio:
     def get_dividend_income(self, currency: str, start_date: Optional[date] = None, 
                            end_date: Optional[date] = None) -> float:
         """
-        Calculate total dividend income over a period
+        Calculate total dividend income over a period using the dividends table
         
         Args:
             currency: Target currency code
@@ -201,16 +209,45 @@ class Portfolio:
         if end_date is None:
             end_date = date.today()
             
-        total_dividends = 0.0
-        for transaction in self.transactions:
-            if (transaction.type == TransactionType.DIVIDEND and
-                (start_date is None or transaction.date >= start_date) and
-                transaction.date <= end_date):
-                # TODO: Add currency conversion when implemented
-                dividend_amount = transaction.amount * transaction.price
-                total_dividends += dividend_amount
+        try:
+            from backend.database import db_manager
+            
+            # Use the database manager method to calculate dividend income
+            if start_date:
+                # Calculate dividend income for the specific period
+                total_dividends = 0.0
+                with db_manager.session_scope() as session:
+                    dividends = (session.query(Dividend)
+                               .filter(Dividend.date >= start_date)
+                               .filter(Dividend.date <= end_date)
+                               .all())
+                    
+                    for dividend in dividends:
+                        # Calculate shares held at dividend date to get total dividend received
+                        shares_held = db_manager.get_shares_held_at_date(dividend.ticker, dividend.date)
+                        if shares_held > 0:
+                            dividend_received = dividend.amount_per_share * shares_held
+                            # TODO: Add currency conversion if needed
+                            total_dividends += dividend_received
                 
-        return total_dividends
+                return total_dividends
+            else:
+                # Get all dividend income up to end_date
+                return db_manager.get_dividend_income_up_to_date(end_date, currency)
+                
+        except Exception as e:
+            logger.warning(f"Error getting dividend income from dividends table: {e}")
+            # Fallback to transaction-based dividend calculation
+            total_dividends = 0.0
+            for transaction in self.transactions:
+                if (transaction.type == TransactionType.DIVIDEND and
+                    (start_date is None or transaction.date >= start_date) and
+                    transaction.date <= end_date):
+                    # TODO: Add currency conversion when implemented
+                    dividend_amount = transaction.amount * transaction.price
+                    total_dividends += dividend_amount
+                    
+            return total_dividends
 
     def get_dividend_yield(self, currency: str = 'EUR') -> float:
         """

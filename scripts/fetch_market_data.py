@@ -49,6 +49,30 @@ def _process_and_store(data: pd.DataFrame, ticker: str, db_manager: DatabaseMana
             # Store the EUR-converted price
             db_manager.add_stock_price(ticker, price_date, float(close_price))
 
+def _process_and_store_dividends(dividend_data: dict[str, pd.Series], db_manager: DatabaseManager):
+    """Helper to process and store dividend data for all tickers (dividends are in EUR)."""
+    for ticker, dividends in dividend_data.items():
+        if dividends.empty:
+            continue
+            
+        for dividend_date, dividend_amount in dividends.items():
+            if pd.notna(dividend_amount):
+                # Convert pandas timestamp to date
+                if isinstance(dividend_date, pd.Timestamp):
+                    div_date = dividend_date.date()
+                else:
+                    div_date = dividend_date
+                
+                # Store the dividend amount per share
+                db_manager.add_dividend(
+                    ticker=ticker,
+                    date=div_date,
+                    amount_per_share=float(dividend_amount),
+                    tax_withheld=0.0,  # Would need to be calculated or provided
+                    currency='EUR'  # All dividends are converted to EUR
+                )
+                logging.info(f"Stored dividend for {ticker} on {div_date}: €{dividend_amount:.4f} per share")
+
 def update_stock_details(db_manager: DatabaseManager, market_interface: MarketInterface):
     """
     Fetches and updates missing details (name, currency, sector, country) for all stocks.
@@ -171,6 +195,55 @@ def fetch_and_store_market_data():
                 time.sleep(2)
         
         logging.info("Successfully fetched and stored all new historical market data in EUR.")
+
+        # Step 4: Fetch historical dividends for all stocks in the database
+        logging.info("🎯 Starting dividend data fetching (all dividends will be converted to EUR)")
+        
+        # Group tickers by their latest dividend date
+        tickers_by_dividend_start_date = {}
+        logging.info("Checking for latest dividend data for each ticker...")
+        
+        for ticker in all_tickers:
+            latest_dividend_date = db_manager.get_latest_dividend_date(ticker)
+            dividend_start_date = default_start_date
+            if latest_dividend_date:
+                # If we have dividend data, start fetching from the next day
+                dividend_start_date = latest_dividend_date + timedelta(days=1)
+            
+            # Group tickers by the calculated start date
+            if dividend_start_date not in tickers_by_dividend_start_date:
+                tickers_by_dividend_start_date[dividend_start_date] = []
+            tickers_by_dividend_start_date[dividend_start_date].append(ticker)
+
+        logging.info("Finished grouping tickers by dividend fetch start date.")
+
+        for start_date, tickers_in_group in tickers_by_dividend_start_date.items():
+            if start_date >= end_date:
+                logging.info(f"Dividend data for tickers {tickers_in_group} is already up-to-date. Skipping.")
+                continue
+
+            logging.info(f"Fetching dividend data for {len(tickers_in_group)} tickers from {start_date} to {end_date} (converting to EUR).")
+            
+            # Process dividends in smaller batches to be respectful to the API
+            batch_size = 5  # Smaller batch size for dividends since they're fetched individually
+            for i in range(0, len(tickers_in_group), batch_size):
+                batch_tickers = tickers_in_group[i:i + batch_size]
+                logging.info(f"Fetching dividend batch: {batch_tickers} (will convert all dividends to EUR)")
+
+                dividend_data = market_interface.get_historical_dividends_for_tickers(batch_tickers, start_date, end_date, target_currency="EUR")
+
+                if dividend_data is None:
+                    logging.warning(f"No dividend data for batch: {batch_tickers}. Skipping.")
+                    time.sleep(3)  # Longer sleep for dividend failures
+                    continue
+
+                # Process and store the dividend data
+                _process_and_store_dividends(dividend_data, db_manager)
+                
+                logging.info(f"Successfully processed dividend batch for: {batch_tickers} (stored dividends in EUR)")
+                time.sleep(3)  # Longer delay for dividend requests
+
+        logging.info("Successfully fetched and stored all new historical dividend data in EUR.")
 
     except Exception as e:
         logging.error(f"An error occurred during market data fetching: {e}")

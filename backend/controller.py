@@ -36,9 +36,16 @@ class Controller:
         # Portfolio no longer needs positions parameter since we calculate from transactions
         return Portfolio([], transactions)
 
-    def add_stock(self, ticker: str, name: str, currency: str, sector: str = None, country: str = None) -> Stock | None:
+    def add_stock(self, ticker: str, name: str, currency: str, sector: str = None, country: str = None, target_price: float = None) -> Stock | None:
         """Adds a new stock."""
-        return self.db_manager.add_stock(ticker, name, currency, sector, country)
+        stock = self.db_manager.add_stock(ticker, name, currency, sector, country)
+        if stock and target_price is not None:
+            self.db_manager.update_stock_target_price(ticker, target_price)
+        return stock
+
+    def update_stock_target_price(self, ticker: str, target_price: float) -> bool:
+        """Update the target price for a stock."""
+        return self.db_manager.update_stock_target_price(ticker, target_price)
 
     def add_transaction(
         self,
@@ -69,7 +76,8 @@ class Controller:
                     name=stock_info.get('name', ticker),
                     currency=currency, # Use currency from form
                     sector=stock_info.get('sector'),
-                    country=stock_info.get('country')
+                    country=stock_info.get('country'),
+                    target_price=sell_target
                 )
                 if not stock:
                     logger.error(f"Failed to add new stock {ticker} to database.")
@@ -86,7 +94,11 @@ class Controller:
                 cost=transaction_cost
             )
 
-            # Step 3: Reload portfolio to reflect new transaction
+            # Step 3: Set target price if provided
+            if sell_target is not None:
+                self.db_manager.update_stock_target_price(ticker, sell_target)
+
+            # Step 4: Reload portfolio to reflect new transaction
             self.portfolio = self._load_portfolio_from_db()
             
             logger.info("Transaction added successfully.")
