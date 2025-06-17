@@ -1136,3 +1136,75 @@ class Controller:
         except Exception as e:
             logger.error("Error loading watchlist table", exc_info=True)
             return []
+
+    def get_transactions_data_for_table(self) -> list[dict]:
+        """Returns a list of dictionaries with transaction data for the frontend table."""
+        try:
+            return self.db_manager.get_transactions_data_for_table()
+        except Exception as e:
+            logger.error("Error loading transactions table", exc_info=True)
+            return []
+
+    def get_dividends_data_for_table(self) -> list[dict]:
+        """Returns a list of dictionaries with dividend data for the frontend table."""
+        try:
+            return self.db_manager.get_dividends_data_for_table()
+        except Exception as e:
+            logger.error("Error loading dividends table", exc_info=True)
+            return []
+
+    def update_watchlist_item(self, item_id: int, **kwargs) -> bool:
+        """Update a watchlist item"""
+        try:
+            return self.db_manager.update_watchlist_item(item_id, **kwargs)
+        except Exception as e:
+            logger.error(f"Error updating watchlist item: {e}")
+            return False
+
+    def update_transaction_record(self, transaction_id: int, **kwargs) -> bool:
+        """Update a transaction record"""
+        try:
+            success = self.db_manager.update_transaction(transaction_id, **kwargs)
+            if success:
+                # Reload portfolio to reflect changes
+                self.portfolio = self._load_portfolio_from_db()
+            return success
+        except Exception as e:
+            logger.error(f"Error updating transaction: {e}")
+            return False
+
+    def update_dividend_record(self, dividend_id: int, **kwargs) -> bool:
+        """Update a dividend record"""
+        try:
+            return self.db_manager.update_dividend(dividend_id, **kwargs)
+        except Exception as e:
+            logger.error(f"Error updating dividend: {e}")
+            return False
+
+    def delete_transaction_record(self, transaction_id: int) -> bool:
+        """Delete a transaction record"""
+        try:
+            success = self.db_manager.delete_transaction(transaction_id)
+            if success:
+                # Reload portfolio to reflect changes
+                self.portfolio = self._load_portfolio_from_db()
+            return success
+        except Exception as e:
+            logger.error(f"Error deleting transaction: {e}")
+            return False
+
+    def delete_dividend_record(self, dividend_id: int) -> bool:
+        """Delete a dividend record"""
+        try:
+            return self.db_manager.delete_dividend(dividend_id)
+        except Exception as e:
+            logger.error(f"Error deleting dividend: {e}")
+            return False
+
+    def delete_watchlist_item_by_id(self, item_id: int) -> bool:
+        """Delete a watchlist item by ID"""
+        try:
+            return self.db_manager.delete_watchlist_item(item_id)
+        except Exception as e:
+            logger.error(f"Error deleting watchlist item: {e}")
+            return False

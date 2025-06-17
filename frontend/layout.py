@@ -1,6 +1,7 @@
 import dash
 from dash import dcc, html, dash_table
 import dash_bootstrap_components as dbc
+import dash_ag_grid as dag
 from datetime import date, timedelta
 import logging
 
@@ -315,14 +316,16 @@ def create_layout():
                     ], width=12),
                 ]),
                 
-                # Watchlist Section
+                # Data Management Section
                 dbc.Row([
                     dbc.Col([
                         dbc.Card([
-                            dbc.CardHeader(html.H4("Watchlist")),
+                            dbc.CardHeader(html.H4("Data Management")),
                             dbc.CardBody([
-                                # Store for watchlist data
+                                # Store components for each table
                                 dcc.Store(id='watchlist-data-store'),
+                                dcc.Store(id='transactions-data-store'),
+                                dcc.Store(id='dividends-data-store'),
                                 
                                 # Add to watchlist form
                                 dbc.Row([
@@ -336,38 +339,90 @@ def create_layout():
                                     ], width=12),
                                 ], className="mb-3"),
                                 
-                                # Watchlist table
-                                dash_table.DataTable(
-                                    id='watchlist-table',
-                                    columns=[
-                                        {'name': 'Ticker', 'id': 'ticker'},
-                                        {'name': 'Name', 'id': 'name'},
-                                        {'name': 'Sector', 'id': 'sector'},
-                                        {'name': 'Country', 'id': 'country'},
-                                        {'name': 'Current Price', 'id': 'current_price', 'type': 'numeric', 'format': {'specifier': '$.2f'}},
-                                        {'name': 'Target Price', 'id': 'strike_price', 'type': 'numeric', 'format': {'specifier': '$.2f'}},
-                                        {'name': 'Date Added', 'id': 'date_added'},
-                                        {'name': 'Actions', 'id': 'actions', 'presentation': 'markdown'},
-                                    ],
-                                    data=[],
-                                    style_cell={
-                                        'textAlign': 'left',
-                                        'padding': '10px',
-                                    },
-                                    style_header={
-                                        'backgroundColor': 'rgb(230, 230, 230)',
-                                        'fontWeight': 'bold'
-                                    },
-                                    style_data_conditional=[
-                                        {
-                                            'if': {'row_index': 'odd'},
-                                            'backgroundColor': 'rgb(248, 248, 248)'
-                                        }
-                                    ],
-                                    page_size=10,
-                                ),
+                                # Tabs for different data tables
+                                dbc.Tabs([
+                                    dbc.Tab([
+                                        dag.AgGrid(
+                                            id='watchlist-aggrid',
+                                            columnDefs=[
+                                                {"field": "id", "hide": True},
+                                                {"field": "ticker", "headerName": "Ticker", "width": 100, "editable": False},
+                                                {"field": "name", "headerName": "Name", "width": 200, "editable": False},
+                                                {"field": "sector", "headerName": "Sector", "width": 150, "editable": False},
+                                                {"field": "country", "headerName": "Country", "width": 120, "editable": False},
+                                                {"field": "current_price", "headerName": "Current Price", "width": 120, "type": "numericColumn", "valueFormatter": {"function": "params.data && params.data.currency ? (params.data.currency === 'EUR' ? '€' : params.data.currency === 'GBP' ? '£' : '$') + d3.format('.2f')(params.value || 0) : d3.format('$.2f')(params.value || 0)"}, "editable": False},
+                                                {"field": "strike_price", "headerName": "Target Price", "width": 120, "type": "numericColumn", "valueFormatter": {"function": "params.data && params.data.currency ? (params.data.currency === 'EUR' ? '€' : params.data.currency === 'GBP' ? '£' : '$') + d3.format('.2f')(params.value || 0) : d3.format('$.2f')(params.value || 0)"}, "editable": True},
+                                                {"field": "notes", "headerName": "Notes", "width": 200, "editable": True},
+                                                {"field": "date_added", "headerName": "Date Added", "width": 120, "editable": False},
+                                            ],
+                                            rowData=[],
+                                            defaultColDef={"resizable": True, "sortable": True, "filter": True},
+                                            dashGridOptions={
+                                                "pagination": True,
+                                                "paginationPageSize": 10,
+                                                "rowSelection": "single",
+                                                "suppressRowClickSelection": True,
+                                                "animateRows": True,
+                                            },
+                                            style={"height": "400px"}
+                                        )
+                                    ], label="Watchlist"),
+                                    dbc.Tab([
+                                        dag.AgGrid(
+                                            id='transactions-aggrid',
+                                            columnDefs=[
+                                                {"field": "id", "hide": True},
+                                                {"field": "type", "headerName": "Type", "width": 100, "editable": True, "cellEditor": "agSelectCellEditor", "cellEditorParams": {"values": ["buy", "sell", "dividend"]}},
+                                                {"field": "ticker", "headerName": "Ticker", "width": 100, "editable": True},
+                                                {"field": "name", "headerName": "Name", "width": 200, "editable": False},
+                                                {"field": "amount", "headerName": "Shares", "width": 100, "type": "numericColumn", "valueFormatter": {"function": "d3.format('.2f')(params.value || 0)"}, "editable": True},
+                                                {"field": "price", "headerName": "Price", "width": 100, "type": "numericColumn", "valueFormatter": {"function": "params.data && params.data.currency ? (params.data.currency === 'EUR' ? '€' : params.data.currency === 'GBP' ? '£' : '$') + d3.format('.2f')(params.value || 0) : d3.format('$.2f')(params.value || 0)"}, "editable": True},
+                                                {"field": "currency", "headerName": "Currency", "width": 100, "editable": True, "cellEditor": "agSelectCellEditor", "cellEditorParams": {"values": ["EUR", "USD", "GBP"]}},
+                                                {"field": "date", "headerName": "Date", "width": 120, "editable": True, "cellEditor": "agDateCellEditor"},
+                                                {"field": "cost", "headerName": "Cost", "width": 100, "type": "numericColumn", "valueFormatter": {"function": "params.data && params.data.currency ? (params.data.currency === 'EUR' ? '€' : params.data.currency === 'GBP' ? '£' : '$') + d3.format('.2f')(params.value || 0) : d3.format('$.2f')(params.value || 0)"}, "editable": True},
+                                                {"field": "total_value", "headerName": "Total Value", "width": 120, "type": "numericColumn", "valueFormatter": {"function": "params.data && params.data.currency ? (params.data.currency === 'EUR' ? '€' : params.data.currency === 'GBP' ? '£' : '$') + d3.format('.2f')(params.value || 0) : d3.format('$.2f')(params.value || 0)"}, "editable": False},
+                                            ],
+                                            rowData=[],
+                                            defaultColDef={"resizable": True, "sortable": True, "filter": True},
+                                            dashGridOptions={
+                                                "pagination": True,
+                                                "paginationPageSize": 10,
+                                                "rowSelection": "single",
+                                                "suppressRowClickSelection": True,
+                                                "animateRows": True,
+                                            },
+                                            style={"height": "400px"}
+                                        )
+                                    ], label="Transactions"),
+                                    dbc.Tab([
+                                        dag.AgGrid(
+                                            id='dividends-aggrid',
+                                            columnDefs=[
+                                                {"field": "id", "hide": True},
+                                                {"field": "ticker", "headerName": "Ticker", "width": 100, "editable": True},
+                                                {"field": "name", "headerName": "Name", "width": 200, "editable": False},
+                                                {"field": "date", "headerName": "Date", "width": 120, "editable": True, "cellEditor": "agDateCellEditor"},
+                                                {"field": "amount_per_share", "headerName": "Amount per Share", "width": 150, "type": "numericColumn", "valueFormatter": {"function": "params.data && params.data.currency ? (params.data.currency === 'EUR' ? '€' : params.data.currency === 'GBP' ? '£' : '$') + d3.format('.4f')(params.value || 0) : d3.format('$.4f')(params.value || 0)"}, "editable": True},
+                                                {"field": "shares_held", "headerName": "Shares Held", "width": 120, "type": "numericColumn", "valueFormatter": {"function": "d3.format('.2f')(params.value || 0)"}, "editable": False},
+                                                {"field": "total_dividend", "headerName": "Total Dividend", "width": 130, "type": "numericColumn", "valueFormatter": {"function": "params.data && params.data.currency ? (params.data.currency === 'EUR' ? '€' : params.data.currency === 'GBP' ? '£' : '$') + d3.format('.2f')(params.value || 0) : d3.format('$.2f')(params.value || 0)"}, "editable": False},
+                                                {"field": "tax_withheld", "headerName": "Tax Withheld", "width": 120, "type": "numericColumn", "valueFormatter": {"function": "params.data && params.data.currency ? (params.data.currency === 'EUR' ? '€' : params.data.currency === 'GBP' ? '£' : '$') + d3.format('.2f')(params.value || 0) : d3.format('$.2f')(params.value || 0)"}, "editable": True},
+                                                {"field": "currency", "headerName": "Currency", "width": 100, "editable": True, "cellEditor": "agSelectCellEditor", "cellEditorParams": {"values": ["EUR", "USD", "GBP"]}},
+                                            ],
+                                            rowData=[],
+                                            defaultColDef={"resizable": True, "sortable": True, "filter": True},
+                                            dashGridOptions={
+                                                "pagination": True,
+                                                "paginationPageSize": 10,
+                                                "rowSelection": "single",
+                                                "suppressRowClickSelection": True,
+                                                "animateRows": True,
+                                            },
+                                            style={"height": "400px"}
+                                        )
+                                    ], label="Dividends"),
+                                ]),
                                 
-                                html.Div(id="watchlist-result", className="mt-2"),
+                                html.Div(id="data-management-result", className="mt-2"),
                             ]),
                         ], className="mb-4"),
                     ], width=12),

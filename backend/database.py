@@ -81,10 +81,6 @@ class Transaction(Base):
         {'sqlite_autoincrement': True},
     )
 
-class Dividend(Transaction):
-    """Dividend model, inherits from Transaction"""
-    pass
-
 class Dividend(Base):
     """Dividend payments table"""
     __tablename__ = 'dividends'
@@ -558,16 +554,134 @@ class DatabaseManager:
                 current_price = latest_price_info.price if latest_price_info else 0
                 
                 watchlist_data.append({
+                    'id': item.id,
                     'ticker': stock.ticker,
                     'name': stock.name,
                     'sector': stock.sector,
                     'country': stock.country,
+                    'currency': stock.currency,
                     'current_price': current_price,
                     'strike_price': item.strike_price,
+                    'notes': item.notes,
                     'date_added': item.date_added.isoformat(),
                     'actions': f'[Remove](/remove-from-watchlist/{stock.ticker})'
                 })
             return watchlist_data
+
+    def get_transactions_data_for_table(self) -> list[dict]:
+        """Returns a list of dictionaries with transaction data for the frontend table."""
+        with self.session_scope() as session:
+            transactions = session.query(Transaction).options(joinedload(Transaction.stock)).order_by(Transaction.date.desc(), Transaction.id.desc()).all()
+            transactions_data = []
+            for transaction in transactions:
+                stock = transaction.stock
+                stock_name = stock.name if stock else transaction.ticker
+                
+                transactions_data.append({
+                    'id': transaction.id,
+                    'type': transaction.type,
+                    'ticker': transaction.ticker,
+                    'name': stock_name,
+                    'amount': transaction.amount,
+                    'price': transaction.price,
+                    'currency': transaction.currency,
+                    'date': transaction.date.isoformat(),
+                    'cost': transaction.cost,
+                    'total_value': transaction.amount * transaction.price
+                })
+            return transactions_data
+
+    def get_dividends_data_for_table(self) -> list[dict]:
+        """Returns a list of dictionaries with dividend data for the frontend table."""
+        with self.session_scope() as session:
+            dividends = session.query(Dividend).options(joinedload(Dividend.stock)).order_by(Dividend.date.desc(), Dividend.id.desc()).all()
+            dividends_data = []
+            for dividend in dividends:
+                stock = dividend.stock
+                stock_name = stock.name if stock else dividend.ticker
+                
+                # Get shares held at dividend date to calculate total dividend received
+                shares_held = self.get_shares_held_at_date(dividend.ticker, dividend.date)
+                total_dividend = dividend.amount_per_share * shares_held if shares_held > 0 else 0
+                
+                dividends_data.append({
+                    'id': dividend.id,
+                    'ticker': dividend.ticker,
+                    'name': stock_name,
+                    'date': dividend.date.isoformat(),
+                    'amount_per_share': dividend.amount_per_share,
+                    'shares_held': shares_held,
+                    'total_dividend': total_dividend,
+                    'tax_withheld': dividend.tax_withheld,
+                    'currency': dividend.currency
+                })
+            return dividends_data
+
+    def update_watchlist_item(self, item_id: int, **kwargs) -> bool:
+        """Update a watchlist item"""
+        with self.session_scope() as session:
+            item = session.query(Watchlist).filter(Watchlist.id == item_id).first()
+            if item:
+                for key, value in kwargs.items():
+                    if hasattr(item, key):
+                        setattr(item, key, value)
+                return True
+            return False
+
+    def update_transaction(self, transaction_id: int, **kwargs) -> bool:
+        """Update a transaction"""
+        with self.session_scope() as session:
+            transaction = session.query(Transaction).filter(Transaction.id == transaction_id).first()
+            if transaction:
+                for key, value in kwargs.items():
+                    if hasattr(transaction, key):
+                        # Handle date conversion
+                        if key == 'date' and isinstance(value, str):
+                            value = datetime.datetime.strptime(value, '%Y-%m-%d').date()
+                        setattr(transaction, key, value)
+                return True
+            return False
+
+    def update_dividend(self, dividend_id: int, **kwargs) -> bool:
+        """Update a dividend"""
+        with self.session_scope() as session:
+            dividend = session.query(Dividend).filter(Dividend.id == dividend_id).first()
+            if dividend:
+                for key, value in kwargs.items():
+                    if hasattr(dividend, key):
+                        # Handle date conversion
+                        if key == 'date' and isinstance(value, str):
+                            value = datetime.datetime.strptime(value, '%Y-%m-%d').date()
+                        setattr(dividend, key, value)
+                return True
+            return False
+
+    def delete_transaction(self, transaction_id: int) -> bool:
+        """Delete a transaction"""
+        with self.session_scope() as session:
+            transaction = session.query(Transaction).filter(Transaction.id == transaction_id).first()
+            if transaction:
+                session.delete(transaction)
+                return True
+            return False
+
+    def delete_dividend(self, dividend_id: int) -> bool:
+        """Delete a dividend"""
+        with self.session_scope() as session:
+            dividend = session.query(Dividend).filter(Dividend.id == dividend_id).first()
+            if dividend:
+                session.delete(dividend)
+                return True
+            return False
+
+    def delete_watchlist_item(self, item_id: int) -> bool:
+        """Delete a watchlist item by ID"""
+        with self.session_scope() as session:
+            item = session.query(Watchlist).filter(Watchlist.id == item_id).first()
+            if item:
+                session.delete(item)
+                return True
+            return False
 
     def get_tickers_to_track(self) -> List[str]:
         """Get all unique tickers from transactions and watchlist"""

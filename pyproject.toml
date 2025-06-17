@@ -13,7 +13,11 @@ dependencies = [
     "plotly (>=6.0.0,<7.0.0)",
     "yfinance==0.2.63",
     "sqlalchemy (>=2.0.41,<3.0.0)",
-    "curl-cffi (>=0.11.3,<0.12.0)"
+    "curl-cffi (>=0.11.3,<0.12.0)",
+    "dash (>=2.14.0,<3.0.0)",
+    "dash-bootstrap-components (>=1.5.0,<2.0.0)",
+    "dash-ag-grid (>=31.0.0,<32.0.0)",
+    "flask (>=2.3.0,<3.0.0)"
 ]
 
 

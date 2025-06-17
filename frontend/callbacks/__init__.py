@@ -5,7 +5,8 @@ from . import (
     add_position,
     tax_settings,
     watchlist,
-    portfolio_breakdown
+    portfolio_breakdown,
+    data_management
 )
 
 def register_callbacks(app, controller):
@@ -17,3 +18,4 @@ def register_callbacks(app, controller):
     tax_settings.register_callbacks(app, controller)
     watchlist.register_callbacks(app, controller)
     portfolio_breakdown.register_callbacks(app, controller)
+    data_management.register_callbacks(app, controller)
