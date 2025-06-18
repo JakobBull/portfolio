@@ -125,6 +125,17 @@ def create_layout():
                                             inline=True,
                                         ),
                                     ], width=6),
+                                ], className="mb-3"),
+                                dbc.Row([
+                                    dbc.Col([
+                                        html.Label("Individual Stocks (Optional)", className="mb-2"),
+                                        dbc.Checklist(
+                                            id='stock-selector',
+                                            options=[],  # Will be populated dynamically
+                                            value=[],    # Default: show none
+                                            inline=True,
+                                        ),
+                                    ], width=12),
                                 ], className="mb-4"),
                                 dcc.Graph(id='performance-chart'),
                             ]),
@@ -426,8 +437,42 @@ def create_layout():
                             ]),
                         ], className="mb-4"),
                     ], width=12),
+                                ]),
+                
+                # Individual Stock Price Chart
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardHeader(html.H4("Individual Stock Price Chart")),
+                            dbc.CardBody([
+                                dbc.Row([
+                                    dbc.Col([
+                                        html.Label("Select Stock", className="mb-2"),
+                                        dcc.Dropdown(
+                                            id='single-stock-selector',
+                                            options=[],  # Will be populated dynamically
+                                            value=None,
+                                            placeholder="Select a stock to view price history...",
+                                            clearable=True,
+                                        ),
+                                    ], width=6),
+                                    dbc.Col([
+                                        dcc.DatePickerRange(
+                                            id='stock-chart-date-range',
+                                            min_date_allowed=date.today() - timedelta(days=365*5),
+                                            max_date_allowed=date.today(),
+                                            start_date=date.today() - timedelta(days=365),
+                                            end_date=date.today(),
+                                            display_format='YYYY-MM-DD'
+                                        ),
+                                    ], width=6),
+                                ], className="mb-4"),
+                                dcc.Graph(id='single-stock-chart'),
+                            ]),
+                        ], className="mb-4"),
+                    ], width=12),
                 ]),
-
+                
                 # Tax Settings
                 dbc.Row([
                     dbc.Col([

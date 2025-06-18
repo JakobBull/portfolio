@@ -165,6 +165,40 @@ class Controller:
             logger.error(f"Error fetching benchmark data for {ticker} from database: {e}")
             return None
 
+    def get_current_portfolio_tickers(self) -> List[str]:
+        """Get list of tickers currently in the portfolio."""
+        try:
+            positions = self.db_manager.get_portfolio_positions_at_date(date.today())
+            return list(positions.keys())
+        except Exception as e:
+            logger.error(f"Error getting current portfolio tickers: {e}")
+            return []
+
+    def get_all_stock_tickers(self) -> List[str]:
+        """Get list of all stock tickers in the database."""
+        try:
+            return self.db_manager.get_all_stock_tickers()
+        except Exception as e:
+            logger.error(f"Error getting all stock tickers: {e}")
+            return []
+
+    def get_stock_historical_data(self, ticker: str, start_date: date, end_date: date) -> pd.Series | None:
+        """Fetches individual stock historical data from the database."""
+        try:
+            price_data = self.db_manager.get_historical_stock_prices(ticker, start_date, end_date)
+            if not price_data:
+                logger.warning(f"No stock data found for {ticker} in the database.")
+                return None
+            
+            dates = [p.date for p in price_data]
+            prices = [p.price for p in price_data]
+            price_series = pd.Series(prices, index=pd.to_datetime(dates))
+            
+            return price_series
+        except Exception as e:
+            logger.error(f"Error fetching stock data for {ticker} from database: {e}")
+            return None
+
     def add_to_watchlist(self, ticker: str, target_price: Optional[float] = None, date_added: Optional[date] = None) -> bool:
         """Adds a stock to the watchlist."""
         # Ensure stock exists, if not, fetch info and add it

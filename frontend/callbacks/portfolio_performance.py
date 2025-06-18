@@ -10,16 +10,35 @@ def register_callbacks(app, controller: Controller):
     """Register callbacks for the portfolio performance chart."""
 
     @app.callback(
+        Output("stock-selector", "options"),
+        [
+            Input("url", "pathname"),
+            Input("interval-component", "n_intervals"),
+            Input("transaction-result-store", "data"),
+        ],
+    )
+    def update_stock_selector_options(pathname, n_intervals, transaction_result):
+        """Update stock selector options with current portfolio tickers."""
+        try:
+            current_tickers = controller.get_current_portfolio_tickers()
+            options = [{'label': ticker, 'value': ticker} for ticker in sorted(current_tickers)]
+            return options
+        except Exception as e:
+            logging.error(f"Error updating stock selector options: {e}")
+            return []
+
+    @app.callback(
         Output("performance-chart", "figure"),
         [
             Input("date-range", "start_date"),
             Input("date-range", "end_date"),
             Input("benchmark-selector", "value"),
+            Input("stock-selector", "value"),
             Input("interval-component", "n_intervals"),
             Input("transaction-result-store", "data"),
         ],
     )
-    def update_performance_chart(start_date_str, end_date_str, selected_benchmarks, n_intervals, transaction_result):
+    def update_performance_chart(start_date_str, end_date_str, selected_benchmarks, selected_stocks, n_intervals, transaction_result):
         """Fetches performance data and updates the chart."""
         if transaction_result and transaction_result.get('status') != 'success':
             return dash.no_update
@@ -45,6 +64,7 @@ def register_callbacks(app, controller: Controller):
                     y=portfolio_df["Normalized"],
                     mode="lines",
                     name="Portfolio",
+                    line=dict(width=3)  # Make portfolio line slightly thicker
                 )
             )
 
@@ -63,14 +83,39 @@ def register_callbacks(app, controller: Controller):
                                 y=benchmark_series_normalized,
                                 mode="lines",
                                 name=benchmark_name,
+                                line=dict(dash='dash')  # Make benchmarks dashed
+                            )
+                        )
+
+            # --- Individual Stock Data ---
+            if selected_stocks:
+                for stock_ticker in selected_stocks:
+                    stock_series = controller.get_stock_historical_data(stock_ticker, start_date, end_date)
+                    if stock_series is not None and not stock_series.empty:
+                        # Normalize stock data
+                        stock_series_normalized = (stock_series / stock_series.iloc[0]) * 100
+                        fig.add_trace(
+                            go.Scatter(
+                                x=stock_series_normalized.index,
+                                y=stock_series_normalized,
+                                mode="lines",
+                                name=stock_ticker,
+                                line=dict(width=1, dash='dot')  # Make stocks thinner and dotted
                             )
                         )
 
             fig.update_layout(
-                title="Portfolio Performance vs. Benchmarks",
+                title="Portfolio Performance vs. Benchmarks & Individual Stocks",
                 xaxis_title="Date",
                 yaxis_title="Value (Normalized to 100)",
                 template="plotly_white",
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
             )
             return fig
 

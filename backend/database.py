@@ -63,7 +63,7 @@ class StockPrice(Base):
 
 class Transaction(Base):
     """Transaction model for storing portfolio transactions"""
-    __tablename__ = 'transactions'
+    __tablename__ = 'dummy_transactions'
     
     id = Column(Integer, primary_key=True)
     type = Column(Enum("buy", "sell", "dividend"), nullable=False)
