@@ -28,7 +28,7 @@ class FundamentalValuationModel:
     - c: Constant term (constrained >= 0)
     """
     
-    def __init__(self, db_manager: DatabaseManager, alpha: float = 0.25, beta: float = 0.15, 
+    def __init__(self, db_manager: DatabaseManager, alpha: float = 0.01, beta: float = 0.15, 
                  ridge_alpha: float = 1.0):
         """
         Initialize the fundamental valuation model.
@@ -172,26 +172,42 @@ class FundamentalValuationModel:
     def _calculate_exponential_pe_ratio(self, price_series: pd.Series, 
                                       earnings_series: pd.Series) -> pd.Series:
         """
-        Calculate exponentially smoothed PE ratio.
+        Calculate smoothed PE ratio using a rolling average.
         
         Args:
             price_series: Stock price series
             earnings_series: Earnings series (aligned with prices)
             
         Returns:
-            Exponentially smoothed PE ratio series (constrained 3-90)
+            Smoothed PE ratio series (constrained 3-90)
         """
         # Calculate instantaneous PE ratios
         pe_ratios = price_series / earnings_series.replace(0, np.nan)
         pe_ratios = pe_ratios.bfill().ffill()
         
-        # Apply exponential smoothing
-        smoothed_pe = pe_ratios.ewm(alpha=self.alpha, adjust=False).mean()
+        # Apply rolling average smoothing
+        smoothed_pe = self._calculate_smoothed_pe(pe_ratios)
         
         # Constrain PE ratio between 3 and 90
         smoothed_pe = np.clip(smoothed_pe, 3.0, 90.0)
         
         return smoothed_pe
+    
+    def _calculate_smoothed_pe(self, pe_series: pd.Series) -> pd.Series:
+        """
+        Calculates a smoothed PE ratio series using a rolling average.
+        
+        Args:
+            pe_series: A pandas Series of raw PE ratios.
+            
+        Returns:
+            A pandas Series of smoothed PE ratios.
+        """
+        if self.alpha > 0:
+            window_size = max(1, int(1 / self.alpha))
+            if window_size > 1:
+                return pe_series.rolling(window=window_size, min_periods=1).mean()
+        return pe_series
     
     def _calculate_earnings_trend(self, earnings_df: pd.DataFrame, 
                                 reference_dates: pd.Series) -> pd.Series:
@@ -303,9 +319,9 @@ class FundamentalValuationModel:
         
         features_df = pd.DataFrame(features_list)
         
-        # Calculate exponentially smoothed PE ratio
+        # Calculate smoothed PE ratio
         pe_series = pd.Series(features_df['raw_pe'].values, index=features_df.index)
-        smoothed_pe = pe_series.ewm(alpha=self.alpha, adjust=False).mean()
+        smoothed_pe = self._calculate_smoothed_pe(pe_series)
         smoothed_pe = np.clip(smoothed_pe, 3.0, 90.0)  # Constrain PE
         
         # Create final feature matrix
@@ -323,7 +339,7 @@ class FundamentalValuationModel:
     
     def _calculate_historical_smoothed_pe(self, ticker: str, start_date: date, end_date: date) -> Optional[pd.Series]:
         """
-        Calculates a time series of exponentially smoothed PE ratios.
+        Calculates a time series of smoothed PE ratios using a rolling average.
         This method is safe from lookahead bias.
         """
         price_data = self._get_price_data(ticker, start_date, end_date)
@@ -352,8 +368,8 @@ class FundamentalValuationModel:
             
         pe_df = pd.DataFrame(features_list).set_index('date')
         
-        # Exponential smoothing. adjust=False ensures it's a simple EWM without lookahead bias.
-        smoothed_pe_series = pe_df['raw_pe'].ewm(alpha=self.alpha, adjust=False).mean()
+        # Calculate smoothed PE series using a rolling average.
+        smoothed_pe_series = self._calculate_smoothed_pe(pe_df['raw_pe'])
         
         # Constrain PE ratio
         smoothed_pe_series = np.clip(smoothed_pe_series, 3.0, 90.0)
@@ -579,7 +595,7 @@ class FundamentalValuationModel:
             return {'success': False, 'error': str(e)}
 
     def get_fundamental_value_series(self, ticker: str, start_date: date, 
-                                   end_date: date) -> Optional[pd.Series]:
+                                   end_date: date) -> Dict[str, Optional[pd.Series]]:
         """
         Get a time series of fundamental values for plotting against actual prices.
         
@@ -589,26 +605,31 @@ class FundamentalValuationModel:
             end_date: End date for the series
             
         Returns:
-            Series with fundamental values indexed by date, or None if fails
+            A dictionary containing:
+            - 'fundamental_values': Series with fundamental values indexed by date
+            - 'smoothed_pe': Series with smoothed PE ratios
+            - 'ttm_earnings': Series with trailing 12-month earnings
+            or a dictionary of Nones if it fails.
         """
         if not self.is_fitted:
             logger.error("Model must be fitted before generating fundamental values")
-            return None
+            return {'fundamental_values': None, 'smoothed_pe': None, 'ttm_earnings': None}
         
         try:
             # Calculate smoothed PE series for the entire period
             smoothed_pe_series = self._calculate_historical_smoothed_pe(ticker, start_date, end_date)
             if smoothed_pe_series is None:
                 logger.error(f"Could not generate smoothed PE series for {ticker}")
-                return None
+                return {'fundamental_values': None, 'smoothed_pe': None, 'ttm_earnings': None}
 
             earnings_data = self._get_earnings_data(ticker, start_date, end_date)
             if earnings_data.empty:
                 logger.error(f"Insufficient earnings data for {ticker} fundamental value series")
-                return None
+                return {'fundamental_values': None, 'smoothed_pe': None, 'ttm_earnings': None}
             
             # Generate fundamental values for each date in the smoothed PE series
             fundamental_values = []
+            ttm_earnings_values = []
             dates = []
             
             for ref_date, smoothed_pe in smoothed_pe_series.items():
@@ -637,21 +658,37 @@ class FundamentalValuationModel:
                 fundamental_value = max(0.0, fundamental_value)
                 
                 fundamental_values.append(fundamental_value)
-                dates.append(ref_date.date())
+                ttm_earnings_values.append(trailing_earnings)
+                dates.append(ref_date)
             
             if not fundamental_values:
                 logger.error(f"No fundamental values generated for {ticker}")
-                return None
+                return {'fundamental_values': None, 'smoothed_pe': None, 'ttm_earnings': None}
             
             # Create pandas Series
+            index = pd.to_datetime(dates)
+
             fundamental_series = pd.Series(
                 fundamental_values, 
-                index=pd.to_datetime(dates),
+                index=index,
                 name=f'{ticker}_fundamental_value'
             )
             
-            return fundamental_series
+            ttm_earnings_series = pd.Series(
+                ttm_earnings_values,
+                index=index,
+                name=f'{ticker}_ttm_earnings'
+            )
+            
+            # Filter the original smoothed PE series to match dates
+            final_smoothed_pe_series = smoothed_pe_series[smoothed_pe_series.index.isin(index)]
+
+            return {
+                'fundamental_values': fundamental_series,
+                'smoothed_pe': final_smoothed_pe_series,
+                'ttm_earnings': ttm_earnings_series,
+            }
             
         except Exception as e:
             logger.error(f"Error generating fundamental value series for {ticker}: {e}")
-            return None 
+            return {'fundamental_values': None, 'smoothed_pe': None, 'ttm_earnings': None} 

@@ -26,31 +26,28 @@ def register_callbacks(app, controller: Controller):
         return ""
 
     @callback(
-        [Output('transaction-result', 'children'),
+        [Output('transaction-status', 'children'),
          Output('transaction-result-store', 'data')],
         Input('add-transaction-button', 'n_clicks'),
         [State('ticker-input', 'value'),
-         State('transaction-type', 'value'),
+         State('transaction-type-input', 'value'),
          State('shares-input', 'value'),
          State('price-input', 'value'),
-         State('currency-input', 'value'),
-         State('transaction-cost-input', 'value'),
-         State('date-input', 'date'),
-         State('sell-target-input', 'value')],
+         State('cost-input', 'value'),
+         State('transaction-date-input', 'date')],
         prevent_initial_call=True
     )
-    def add_transaction(n_clicks, ticker, transaction_type, shares, price, currency, cost, date_str, sell_target):
+    def add_transaction(n_clicks, ticker, transaction_type, shares, price, cost, date_str):
         if not n_clicks:
             return "", None
 
         try:
-            if not all([ticker, transaction_type, shares, price, currency, date_str]):
+            if not all([ticker, transaction_type, shares, price, date_str]):
                 return html.Div("Please fill in all required fields.", className="alert alert-danger"), None
             
             shares = float(shares)
             price = float(price)
             cost = float(cost) if cost else 0.0
-            sell_target = float(sell_target) if sell_target else None
             transaction_date = datetime.strptime(date_str.split('T')[0], '%Y-%m-%d').date()
 
             success = controller.add_transaction(
@@ -59,9 +56,7 @@ def register_callbacks(app, controller: Controller):
                 shares=shares,
                 price=price,
                 transaction_date=transaction_date,
-                currency=currency,
-                transaction_cost=cost,
-                sell_target=sell_target
+                transaction_cost=cost
             )
 
             if success:

@@ -5,6 +5,7 @@ from dash import Input, Output, callback, State, no_update, ctx
 import dash
 from datetime import date, datetime
 from backend.controller import Controller
+from plotly.subplots import make_subplots
 
 def register_callbacks(app, controller: Controller):
     """Register callbacks for the single stock price chart."""
@@ -47,16 +48,39 @@ def register_callbacks(app, controller: Controller):
             data_result = controller.get_stock_data_with_fundamental_values(selected_ticker, start_date, end_date)
             stock_series = data_result.get('stock_series')
             fundamental_series = data_result.get('fundamental_series')
-            model_info = data_result.get('model_info', {})
-            
-            fig = go.Figure()
+            smoothed_pe = data_result.get('smoothed_pe')
+            ttm_earnings = data_result.get('ttm_earnings')
+
             if stock_series is None or stock_series.empty:
+                fig = go.Figure()
                 fig.update_layout(title=f"No data available for {selected_ticker}")
                 return fig
 
-            fig.add_trace(go.Scatter(x=stock_series.index, y=stock_series.values, mode="lines", name=f"{selected_ticker} (Actual)"))
+            # Create figure with secondary y-axis
+            fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+            # Add traces for price and fundamental value on primary y-axis
+            fig.add_trace(go.Scatter(x=stock_series.index, y=stock_series.values, mode="lines", name=f"{selected_ticker} (Price)"), secondary_y=False)
             if fundamental_series is not None and not fundamental_series.empty:
-                fig.add_trace(go.Scatter(x=fundamental_series.index, y=fundamental_series.values, mode="lines", name=f"{selected_ticker} (Fundamental)", line=dict(dash='dash')))
+                fig.add_trace(go.Scatter(x=fundamental_series.index, y=fundamental_series.values, mode="lines", name="Fundamental Value", line=dict(dash='dash')), secondary_y=False)
+
+            # Add traces for PE ratio and TTM earnings on secondary y-axis
+            if smoothed_pe is not None and not smoothed_pe.empty:
+                fig.add_trace(go.Scatter(x=smoothed_pe.index, y=smoothed_pe.values, mode="lines", name="Smoothed PE Ratio"), secondary_y=True)
+            
+            if ttm_earnings is not None and not ttm_earnings.empty:
+                fig.add_trace(go.Scatter(x=ttm_earnings.index, y=ttm_earnings.values, mode="lines", name="TTM Earnings"), secondary_y=True)
+
+
+            # Set y-axes titles
+            fig.update_yaxes(title_text="Price ($)", secondary_y=False)
+            fig.update_yaxes(title_text="Value", secondary_y=True)
+            
+            # Update layout
+            fig.update_layout(
+                title_text=f"{selected_ticker} - Fundamental Analysis",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
 
             return fig
         except Exception as e:

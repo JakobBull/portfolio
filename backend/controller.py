@@ -58,14 +58,13 @@ class Controller:
         shares: float,
         price: float,
         transaction_date: date,
-        currency: str,
         transaction_cost: float,
         sell_target: Optional[float] = None
     ) -> bool:
         """Adds a new transaction."""
-        logger.info(f"Adding transaction: {ticker}, {transaction_type}, {shares}, {price}, {transaction_date}, {currency}, {transaction_cost}")
         
         try:
+            determined_currency = None
             # Step 1: Check if stock exists, if not, try to add it.
             stock = self.db_manager.get_stock(ticker)
             if not stock:
@@ -75,10 +74,12 @@ class Controller:
                     logger.error(f"Could not find stock information for ticker {ticker}")
                     return False
                 
+                determined_currency = stock_info.get('currency', 'USD')
+                
                 stock = self.add_stock(
                     ticker=ticker,
                     name=stock_info.get('name', ticker),
-                    currency=currency, # Use currency from form
+                    currency=determined_currency,
                     sector=stock_info.get('sector'),
                     country=stock_info.get('country'),
                     target_price=sell_target
@@ -86,6 +87,10 @@ class Controller:
                 if not stock:
                     logger.error(f"Failed to add new stock {ticker} to database.")
                     return False
+            else:
+                determined_currency = stock.currency
+
+            logger.info(f"Adding transaction: {ticker}, {transaction_type}, {shares}, {price}, {transaction_date}, {determined_currency}, {transaction_cost}")
 
             # Step 2: Add the transaction to the database
             self.db_manager.add_transaction(
@@ -93,7 +98,7 @@ class Controller:
                 ticker=ticker,
                 amount=shares,
                 price=price,
-                currency=currency,
+                currency=determined_currency,
                 transaction_date=transaction_date,
                 cost=transaction_cost
             )
@@ -1274,87 +1279,55 @@ class Controller:
             return False
 
     def delete_watchlist_item_by_id(self, item_id: int) -> bool:
-        """Delete a watchlist item by ID"""
-        try:
-            return self.db_manager.delete_watchlist_item(item_id)
-        except Exception as e:
-            logger.error(f"Error deleting watchlist item: {e}")
-            return False
-    
+        """Deletes a watchlist item by its ID."""
+        return self.db_manager.delete_watchlist_item(item_id)
+
     def get_stock_data_with_fundamental_values(self, ticker: str, start_date: date, end_date: date) -> Dict[str, Any]:
         """
-        Get stock historical data along with fundamental values from the model.
+        Retrieves stock data along with its fundamental valuation.
         
         Args:
             ticker: Stock ticker
-            start_date: Start date for data
-            end_date: End date for data
+            start_date: Start date for data retrieval
+            end_date: End date for data retrieval
             
         Returns:
-            Dictionary containing stock_series, fundamental_series, and model_info
+            Dictionary with stock series, fundamental series, and model info
         """
+        logger.info(f"Getting stock data with fundamental values for {ticker}")
+        
         try:
-            # Get historical stock data
+            # Get historical stock prices
             stock_series = self.get_stock_historical_data(ticker, start_date, end_date)
             
-            if stock_series is None or stock_series.empty:
-                logger.warning(f"No stock data found for {ticker}")
-                return {
-                    'stock_series': None,
-                    'fundamental_series': None,
-                    'model_info': {'success': False, 'error': 'No stock data found'}
-                }
-            
-            # Determine training period (use available data minus some buffer for validation)
-            data_start = stock_series.index.min().date()
-            data_end = stock_series.index.max().date()
-            
-            # Use 80% of available data for training, but at least 2 years if available
-            training_days = (data_end - data_start).days
-            if training_days < 730:  # Less than 2 years
-                training_end = data_end
-            else:
-                # Use most of the data for training, leaving some recent data for validation
-                training_end_days = int(training_days * 0.9)
-                training_end = data_start + timedelta(days=training_end_days)
-            
-            logger.info(f"Fitting fundamental model for {ticker} from {data_start} to {training_end}")
-            
             # Fit the fundamental model
-            model_results = self.fundamental_model.fit(ticker, data_start, training_end)
+            # Use a longer history for more robust model fitting
+            fit_start_date = start_date - timedelta(days=365 * 5) # 5 years of data
+            self.fundamental_model.fit(ticker, fit_start_date, end_date)
             
-            if not model_results.get('success', False):
-                logger.warning(f"Model fitting failed for {ticker}: {model_results.get('error', 'Unknown error')}")
-                return {
-                    'stock_series': stock_series,
-                    'fundamental_series': None,
-                    'model_info': model_results
-                }
+            # Get all fundamental value series
+            fundamental_data = self.fundamental_model.get_fundamental_value_series(ticker, start_date, end_date)
             
-            # Get fundamental value series for the entire period
-            fundamental_series = self.fundamental_model.get_fundamental_value_series(
-                ticker, start_date, end_date
-            )
+            # Get model summary
+            model_info = self.fundamental_model.get_model_summary()
             
-            if fundamental_series is None:
-                logger.warning(f"Could not generate fundamental values for {ticker}")
-                return {
-                    'stock_series': stock_series,
-                    'fundamental_series': None,
-                    'model_info': model_results
-                }
-            
-            logger.info(f"Successfully generated stock and fundamental data for {ticker}")
-            return {
+            result = {
                 'stock_series': stock_series,
-                'fundamental_series': fundamental_series,
-                'model_info': model_results
+                'model_info': model_info
             }
+            if fundamental_data:
+                if 'fundamental_values' in fundamental_data:
+                    fundamental_data['fundamental_series'] = fundamental_data.pop('fundamental_values')
+                result.update(fundamental_data)
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error getting stock data with fundamental values for {ticker}: {e}")
             return {
-                'stock_series': None if 'stock_series' not in locals() else stock_series,
+                'stock_series': None,
                 'fundamental_series': None,
-                'model_info': {'success': False, 'error': str(e)}
+                'smoothed_pe': None,
+                'ttm_earnings': None,
+                'model_info': {'error': str(e)}
             }

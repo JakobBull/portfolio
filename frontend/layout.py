@@ -10,7 +10,7 @@ def create_layout():
     logging.info("Creating application layout")
     
     # Set default dates for date range picker
-    default_start_date = date.today() - timedelta(days=365)
+    default_start_date = date.today() - timedelta(days=365*9)
     default_end_date = date.today()
     logging.info(f"Setting default date range: {default_start_date} to {default_end_date}")
     
