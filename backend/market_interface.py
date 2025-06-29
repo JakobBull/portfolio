@@ -41,7 +41,7 @@ def _patch_yfinance_cookie_handling():
         original = _data.YfData._get_cookie_basic
         
         def _patched(self, proxy=None, timeout=30):
-            cookie = original(self, proxy, timeout)
+            cookie = original(self, proxy)
             return _wrap_cookie(cookie, self._session)
         
         _data.YfData._get_cookie_basic = _patched
