@@ -12,6 +12,7 @@ from backend.database import db_manager, DatabaseManager
 from backend.database import TransactionType
 import json
 from backend.market_interface import MarketInterface
+from backend.model import FundamentalValuationModel
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -29,6 +30,9 @@ class Controller:
         self.benchmark_comparison = None
         self.benchmark_start_date = None
         self.benchmark_end_date = None
+        
+        # Initialize fundamental valuation model
+        self.fundamental_model = FundamentalValuationModel(self.db_manager)
         
     def _load_portfolio_from_db(self) -> Portfolio:
         """Loads portfolio data from the database using transactions."""
@@ -1242,3 +1246,81 @@ class Controller:
         except Exception as e:
             logger.error(f"Error deleting watchlist item: {e}")
             return False
+    
+    def get_stock_data_with_fundamental_values(self, ticker: str, start_date: date, end_date: date) -> Dict[str, Any]:
+        """
+        Get stock historical data along with fundamental values from the model.
+        
+        Args:
+            ticker: Stock ticker
+            start_date: Start date for data
+            end_date: End date for data
+            
+        Returns:
+            Dictionary containing stock_series, fundamental_series, and model_info
+        """
+        try:
+            # Get historical stock data
+            stock_series = self.get_stock_historical_data(ticker, start_date, end_date)
+            
+            if stock_series is None or stock_series.empty:
+                logger.warning(f"No stock data found for {ticker}")
+                return {
+                    'stock_series': None,
+                    'fundamental_series': None,
+                    'model_info': {'success': False, 'error': 'No stock data found'}
+                }
+            
+            # Determine training period (use available data minus some buffer for validation)
+            data_start = stock_series.index.min().date()
+            data_end = stock_series.index.max().date()
+            
+            # Use 80% of available data for training, but at least 2 years if available
+            training_days = (data_end - data_start).days
+            if training_days < 730:  # Less than 2 years
+                training_end = data_end
+            else:
+                # Use most of the data for training, leaving some recent data for validation
+                training_end_days = int(training_days * 0.9)
+                training_end = data_start + timedelta(days=training_end_days)
+            
+            logger.info(f"Fitting fundamental model for {ticker} from {data_start} to {training_end}")
+            
+            # Fit the fundamental model
+            model_results = self.fundamental_model.fit(ticker, data_start, training_end)
+            
+            if not model_results.get('success', False):
+                logger.warning(f"Model fitting failed for {ticker}: {model_results.get('error', 'Unknown error')}")
+                return {
+                    'stock_series': stock_series,
+                    'fundamental_series': None,
+                    'model_info': model_results
+                }
+            
+            # Get fundamental value series for the entire period
+            fundamental_series = self.fundamental_model.get_fundamental_value_series(
+                ticker, start_date, end_date
+            )
+            
+            if fundamental_series is None:
+                logger.warning(f"Could not generate fundamental values for {ticker}")
+                return {
+                    'stock_series': stock_series,
+                    'fundamental_series': None,
+                    'model_info': model_results
+                }
+            
+            logger.info(f"Successfully generated stock and fundamental data for {ticker}")
+            return {
+                'stock_series': stock_series,
+                'fundamental_series': fundamental_series,
+                'model_info': model_results
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting stock data with fundamental values for {ticker}: {e}")
+            return {
+                'stock_series': None if 'stock_series' not in locals() else stock_series,
+                'fundamental_series': None,
+                'model_info': {'success': False, 'error': str(e)}
+            }
