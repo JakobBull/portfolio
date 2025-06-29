@@ -13,7 +13,7 @@ import logging
 # Add the project root to the Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.database import db_manager, DB_PATH
+from backend.database import db_manager, DB_PATH, Earning
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -81,7 +81,7 @@ def verify_transactions_table():
         cursor = conn.cursor()
         
         # Get table info
-        cursor.execute("PRAGMA table_info(transactions)")
+        cursor.execute("PRAGMA table_info(dummy_transactions)")
         columns = cursor.fetchall()
         column_names = [col[1] for col in columns]
         
@@ -89,7 +89,7 @@ def verify_transactions_table():
         missing_columns = [col for col in required_columns if col not in column_names]
         
         if missing_columns:
-            logger.error(f"Missing columns in transactions table: {missing_columns}")
+            logger.error(f"Missing columns in dummy_transactions table: {missing_columns}")
             raise ValueError(f"Transactions table is missing required columns: {missing_columns}")
         else:
             logger.info("Transactions table has all required columns")
@@ -98,6 +98,31 @@ def verify_transactions_table():
         
     except Exception as e:
         logger.error(f"Error verifying transactions table: {e}")
+        raise
+
+def add_type_to_earnings_table():
+    """Adds the 'type' column to the 'earnings' table if it doesn't exist."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+
+        # Check if the 'type' column exists
+        cursor.execute("PRAGMA table_info(earnings)")
+        columns = [col[1] for col in cursor.fetchall()]
+        
+        if 'type' not in columns:
+            logger.info("Adding 'type' column to 'earnings' table.")
+            # Add the column with a default value to satisfy the NOT NULL constraint for existing rows
+            cursor.execute("ALTER TABLE earnings ADD COLUMN type VARCHAR(10) NOT NULL DEFAULT 'quarterly'")
+            conn.commit()
+            logger.info("'type' column added successfully with default value 'quarterly'.")
+        else:
+            logger.info("'type' column already exists in 'earnings' table.")
+
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error adding 'type' column to earnings table: {e}")
+        conn.close()
         raise
 
 def main():
@@ -123,6 +148,9 @@ def main():
         logger.info("Recreating database schema...")
         from backend.database import Base, engine
         Base.metadata.create_all(bind=engine)
+        
+        # Add the 'type' column to the earnings table if it doesn't exist
+        add_type_to_earnings_table()
         
         logger.info("Migration completed successfully!")
         logger.info("Portfolio positions will now be calculated dynamically from transactions.")

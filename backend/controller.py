@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Union, Any, Tuple, cast
@@ -301,6 +301,24 @@ class Controller:
         except Exception as e:
             logger.error(f"Error adding dividend: {e}")
             raise ValueError(f"Failed to add dividend: {e}") from e
+
+    def add_earning(self, ticker: str, earning_date_str: str, eps: float, earning_type: str, currency: str = 'USD') -> bool:
+        """Adds a new earning record."""
+        try:
+            if not ticker:
+                raise ValueError("Ticker cannot be empty.")
+            if not isinstance(eps, (int, float)):
+                raise ValueError("EPS must be a number.")
+
+            # Convert date string to date object
+            earning_date = datetime.strptime(earning_date_str, '%Y-%m-%d').date()
+                
+            self.db_manager.add_earning(ticker=ticker, date=earning_date, eps=eps, earning_type=earning_type, currency=currency)
+            logger.info(f"Successfully added earning for {ticker} on {earning_date}.")
+            return True
+        except Exception as e:
+            logger.error(f"Error adding earning record for {ticker}: {e}")
+            return False
 
     def remove_from_watchlist(self, ticker: str) -> bool:
         """Removes a stock from the watchlist."""
@@ -1191,6 +1209,14 @@ class Controller:
             logger.error("Error loading dividends table", exc_info=True)
             return []
 
+    def get_earnings_data_for_table(self, ticker: str) -> list[dict]:
+        """Returns a list of dictionaries with earnings data for the frontend table."""
+        try:
+            return self.db_manager.get_earnings_data_for_table(ticker)
+        except Exception as e:
+            logger.error(f"Error loading earnings table for {ticker}: {e}", exc_info=True)
+            return []
+
     def update_watchlist_item(self, item_id: int, **kwargs) -> bool:
         """Update a watchlist item"""
         try:
@@ -1217,6 +1243,14 @@ class Controller:
             return self.db_manager.update_dividend(dividend_id, **kwargs)
         except Exception as e:
             logger.error(f"Error updating dividend: {e}")
+            return False
+
+    def update_earning_record(self, earning_id: int, **kwargs) -> bool:
+        """Update an earning record."""
+        try:
+            return self.db_manager.update_earning(earning_id, **kwargs)
+        except Exception as e:
+            logger.error(f"Error updating earning: {e}")
             return False
 
     def delete_transaction_record(self, transaction_id: int) -> bool:

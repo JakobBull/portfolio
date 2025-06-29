@@ -76,7 +76,7 @@ class FundamentalValuationModel:
                 from sqlalchemy import text
                 
                 query = text("""
-                SELECT date, amount, currency
+                SELECT date, eps, currency
                 FROM earnings 
                 WHERE ticker = :ticker AND date BETWEEN :start_date AND :end_date
                 ORDER BY date
@@ -96,7 +96,7 @@ class FundamentalValuationModel:
                 
                 # Convert to DataFrame
                 earnings_data = pd.DataFrame([
-                    {'date': row[0], 'amount': row[1], 'currency': row[2]}
+                    {'date': row[0], 'eps': row[1], 'currency': row[2]}
                     for row in rows
                 ])
                 
@@ -166,7 +166,7 @@ class FundamentalValuationModel:
         if trailing_earnings.empty:
             return 0.0
         
-        total_earnings = trailing_earnings['amount'].sum()
+        total_earnings = trailing_earnings['eps'].sum()
         return max(0.0, total_earnings)  # Constrain >= 0
     
     def _calculate_exponential_pe_ratio(self, price_series: pd.Series, 
@@ -221,7 +221,7 @@ class FundamentalValuationModel:
             
             # Calculate quarter-to-quarter changes
             historical_earnings = historical_earnings.sort_values('date')
-            earnings_changes = historical_earnings['amount'].diff().dropna()
+            earnings_changes = historical_earnings['eps'].diff().dropna()
             
             if earnings_changes.empty:
                 earnings_trends.append(0.0)

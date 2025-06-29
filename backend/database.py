@@ -22,7 +22,11 @@ DB_URL = f"sqlite:///{DB_PATH}"
 # Create base class for models
 Base = declarative_base()
 
-class TransactionType(str, Enum):
+class EarningType(str, enum.Enum):
+    QUARTERLY = "quarterly"
+    ANNUAL = "annual"
+
+class TransactionType(str, enum.Enum):
     BUY = "buy"
     SELL = "sell"
     DIVIDEND = "dividend"
@@ -43,6 +47,7 @@ class Stock(Base):
     transactions = relationship("Transaction", back_populates="stock", cascade="all, delete-orphan")
     dividends = relationship("Dividend", back_populates="stock", cascade="all, delete-orphan")
     watchlist_item = relationship("Watchlist", back_populates="stock", uselist=False, cascade="all, delete-orphan")
+    earnings = relationship("Earning", back_populates="stock", cascade="all, delete-orphan")
 
 class StockPrice(Base):
     """Stock price model for storing historical prices"""
@@ -114,6 +119,25 @@ class Watchlist(Base):
     stock = relationship("Stock", back_populates="watchlist_item")
     
     __table_args__ = (
+        {'sqlite_autoincrement': True},
+    )
+
+class Earning(Base):
+    """Earnings per share (EPS) data for stocks"""
+    __tablename__ = 'earnings'
+    
+    id = Column(Integer, primary_key=True)
+    ticker = Column(String, ForeignKey('stocks.ticker'), nullable=False)
+    date = Column(Date, nullable=False)  # 'end of period' date for the earnings
+    eps = Column(Float, nullable=False)  # Earnings Per Share
+    type = Column(Enum(EarningType), nullable=False, default=EarningType.QUARTERLY)
+    currency = Column(String, nullable=False, default='USD')
+    
+    # Relationships
+    stock = relationship("Stock", back_populates="earnings")
+    
+    __table_args__ = (
+        UniqueConstraint('ticker', 'date', name='unique_earning_per_stock_per_date'),
         {'sqlite_autoincrement': True},
     )
 
@@ -617,6 +641,22 @@ class DatabaseManager:
                 })
             return dividends_data
 
+    def get_earnings_data_for_table(self, ticker: str) -> list[dict]:
+        """Returns a list of dictionaries with earnings data for the frontend table."""
+        with self.session_scope() as session:
+            earnings = session.query(Earning).filter_by(ticker=ticker).order_by(Earning.date.desc()).all()
+            earnings_data = []
+            for earning in earnings:
+                earnings_data.append({
+                    'id': earning.id,
+                    'ticker': earning.ticker,
+                    'date': earning.date.isoformat(),
+                    'eps': earning.eps,
+                    'type': earning.type.value,
+                    'currency': earning.currency
+                })
+            return earnings_data
+
     def update_watchlist_item(self, item_id: int, **kwargs) -> bool:
         """Update a watchlist item"""
         with self.session_scope() as session:
@@ -653,6 +693,23 @@ class DatabaseManager:
                         if key == 'date' and isinstance(value, str):
                             value = datetime.datetime.strptime(value, '%Y-%m-%d').date()
                         setattr(dividend, key, value)
+                return True
+            return False
+
+    def update_earning(self, earning_id: int, **kwargs) -> bool:
+        """Update an earning record"""
+        with self.session_scope() as session:
+            earning = session.query(Earning).filter(Earning.id == earning_id).first()
+            if earning:
+                for key, value in kwargs.items():
+                    if hasattr(earning, key):
+                        # Handle date conversion
+                        if key == 'date' and isinstance(value, str):
+                            value = datetime.datetime.strptime(value.split("T")[0], '%Y-%m-%d').date()
+                        # Handle enum conversion
+                        if key == 'type' and isinstance(value, str):
+                            value = EarningType(value)
+                        setattr(earning, key, value)
                 return True
             return False
 
@@ -1000,6 +1057,31 @@ class DatabaseManager:
             dividend_yield = (total_dividend_per_share / current_price)
             
             return dividend_yield
+
+    # Earning operations
+    def add_earning(self, ticker: str, date: datetime.date, eps: float, earning_type: EarningType, currency: str = 'USD') -> Earning | None:
+        """Add or update an earning record for a stock."""
+        with self.session_scope() as session:
+            earning = session.query(Earning).filter_by(ticker=ticker, date=date).first()
+            if earning:
+                earning.eps = eps
+                earning.type = earning_type
+                earning.currency = currency
+            else:
+                earning = Earning(ticker=ticker, date=date, eps=eps, type=earning_type, currency=currency)
+                session.add(earning)
+            session.flush()
+            session.refresh(earning)
+            return earning
+
+    def get_earnings_for_ticker(self, ticker: str, start_date: datetime.date, end_date: datetime.date) -> List[Earning]:
+        """Get earnings for a ticker within a date range."""
+        with self.session_scope() as session:
+            return session.query(Earning).filter(
+                Earning.ticker == ticker,
+                Earning.date >= start_date,
+                Earning.date <= end_date
+            ).order_by(Earning.date).all()
 
 # Singleton instance of the database manager
 db_manager = DatabaseManager() 

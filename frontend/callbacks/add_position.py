@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging
-from dash import Input, Output, State, callback, html
-from datetime import datetime
+from dash import Input, Output, State, callback, html, no_update
+from datetime import datetime, date
 from backend.database import TransactionType
 from backend.controller import Controller
 
@@ -12,15 +12,18 @@ def register_callbacks(app, controller: Controller):
         Output("ticker-input", "value"),
         Input("positions-table", "active_cell"),
         State("positions-table", "data"),
+        prevent_initial_call=True
     )
     def update_ticker_input_from_table(active_cell, table_data):
         """Fills the ticker input when a user clicks on a row in the positions table."""
-        if not active_cell:
+        if not active_cell or not table_data:
             return ""
         
-        row = active_cell["row"]
-        ticker = table_data[row]["ticker"]
-        return ticker
+        row_index = active_cell["row"]
+        if row_index < len(table_data):
+            ticker = table_data[row_index].get("ticker", "")
+            return ticker
+        return ""
 
     @callback(
         [Output('transaction-result', 'children'),

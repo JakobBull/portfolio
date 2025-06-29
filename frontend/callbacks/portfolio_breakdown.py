@@ -11,15 +11,16 @@ def register_callbacks(app, controller):
     @app.callback(
         [
             Output("sector-breakdown-chart", "figure"),
+            Output("country-breakdown-chart", "figure"),
             Output("currency-breakdown-chart", "figure"),
         ],
-        Input("positions-table", "data"), # Trigger when the main positions table data changes
+        Input("positions-table", "data"),
     )
     def update_breakdown_charts(positions_data):
-        """Updates the sector and currency breakdown charts."""
+        """Updates the sector, country, and currency breakdown charts."""
         if not positions_data:
             empty_fig = {"layout": {"title": "No Data Available"}}
-            return empty_fig, empty_fig
+            return empty_fig, empty_fig, empty_fig
 
         try:
             df = pd.DataFrame(positions_data)
@@ -46,9 +47,9 @@ def register_callbacks(app, controller):
             )
             currency_fig.update_traces(textinfo="percent+label")
 
-            return sector_fig, currency_fig
+            return sector_fig, currency_fig, currency_fig
 
         except Exception as e:
             logging.error(f"Error creating breakdown charts: {e}")
             error_fig = {"layout": {"title": "Error Loading Chart"}}
-            return error_fig, error_fig 
+            return error_fig, error_fig, error_fig 

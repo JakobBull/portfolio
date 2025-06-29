@@ -155,50 +155,29 @@ def create_layout():
                                         {'name': 'Ticker', 'id': 'ticker'},
                                         {'name': 'Name', 'id': 'name'},
                                         {'name': 'Shares', 'id': 'shares', 'type': 'numeric', 'format': {'specifier': '.2f'}},
-                                        {'name': 'Price/Sh', 'id': 'current_price', 'type': 'numeric', 'format': {'specifier': '$.2f', 'locale': {'symbol': ['€', '']}}},
-                                        {'name': 'Market Value', 'id': 'market_value', 'type': 'numeric', 'format': {'specifier': '$.2f', 'locale': {'symbol': ['€', '']}}},
-                                        {'name': 'Cost Basis', 'id': 'cost_basis', 'type': 'numeric', 'format': {'specifier': '$.2f', 'locale': {'symbol': ['€', '']}}},
-                                        {'name': 'Unrealized P/L', 'id': 'unrealized_pl', 'type': 'numeric', 'format': {'specifier': '$.2f', 'locale': {'symbol': ['€', '']}}},
+                                        {'name': 'Price/Sh', 'id': 'current_price', 'type': 'numeric', 'format': {'specifier': '$,.2f'}},
+                                        {'name': 'Market Value', 'id': 'market_value', 'type': 'numeric', 'format': {'specifier': '$,.2f'}},
+                                        {'name': 'Cost Basis', 'id': 'cost_basis', 'type': 'numeric', 'format': {'specifier': '$,.2f'}},
+                                        {'name': 'Unrealized P/L', 'id': 'unrealized_pl', 'type': 'numeric', 'format': {'specifier': '$,.2f'}},
                                         {'name': 'Return %', 'id': 'return_pct', 'type': 'numeric', 'format': {'specifier': '.2%'}},
                                         {'name': 'Weight %', 'id': 'weight_pct', 'type': 'numeric', 'format': {'specifier': '.2%'}},
-                                        {'name': 'Target', 'id': 'target_price', 'type': 'numeric', 'format': {'specifier': '$.2f', 'locale': {'symbol': ['€', '']}}, 'editable': True},
-                                        {'name': 'Dividend Yield', 'id': 'dividend_yield', 'type': 'numeric', 'format': {'specifier': '.2%'}},
+                                        {'name': 'Target', 'id': 'target_price', 'type': 'numeric', 'format': {'specifier': '$,.2f'}, 'editable': True},
+                                        {'name': 'Div. Yield', 'id': 'dividend_yield', 'type': 'numeric', 'format': {'specifier': '.2%'}},
+                                        {'name': 'Sector', 'id': 'sector'},
+                                        {'name': 'Country', 'id': 'country'},
+                                        {'name': 'Currency', 'id': 'currency'},
                                     ],
                                     data=[],
                                     style_cell={'textAlign': 'center'},
                                     style_data_conditional=[
-                                        {
-                                            'if': {
-                                                'filter_query': '{unrealized_pl} > 0',
-                                                'column_id': 'unrealized_pl'
-                                            },
-                                            'color': 'green'
-                                        },
-                                        {
-                                            'if': {
-                                                'filter_query': '{unrealized_pl} < 0',
-                                                'column_id': 'unrealized_pl'
-                                            },
-                                            'color': 'red'
-                                        },
-                                        {
-                                            'if': {
-                                                'filter_query': '{return_pct} > 0',
-                                                'column_id': 'return_pct'
-                                            },
-                                            'color': 'green'
-                                        },
-                                        {
-                                            'if': {
-                                                'filter_query': '{return_pct} < 0',
-                                                'column_id': 'return_pct'
-                                            },
-                                            'color': 'red'
-                                        }
+                                        {'if': {'filter_query': '{unrealized_pl} > 0', 'column_id': 'unrealized_pl'}, 'color': 'green'},
+                                        {'if': {'filter_query': '{unrealized_pl} < 0', 'column_id': 'unrealized_pl'}, 'color': 'red'},
+                                        {'if': {'filter_query': '{return_pct} > 0', 'column_id': 'return_pct'}, 'color': 'green'},
+                                        {'if': {'filter_query': '{return_pct} < 0', 'column_id': 'return_pct'}, 'color': 'red'}
                                     ],
                                     sort_action='native',
                                     filter_action='native',
-                                    page_size=10,
+                                    page_size=15,
                                 ),
                             ]),
                         ], className="mb-4"),
@@ -242,84 +221,50 @@ def create_layout():
                                         html.Label("Stock Search"),
                                         dbc.InputGroup([
                                             dbc.Input(id="stock-search", placeholder="Enter ticker or name..."),
-                                            dbc.Button("Search", id="search-button", color="primary"),
+                                            dbc.Button("Search", id="search-button", n_clicks=0, color="primary"),
                                         ]),
                                         html.Div(id="search-results", className="mt-2"),
                                     ], width=6),
                                     dbc.Col([
                                         dbc.Form([
                                             dbc.Row([
-                                                dbc.Col([
-                                                    dbc.Label("Ticker"),
-                                                    dbc.Input(id="ticker-input", placeholder="e.g., AAPL"),
-                                                ], width=6),
-                                                dbc.Col([
-                                                    dbc.Label("Transaction Type"),
-                                                    dbc.Select(
-                                                        id="transaction-type",
-                                                        options=[
-                                                            {"label": "Buy", "value": "buy"},
-                                                            {"label": "Sell", "value": "sell"},
-                                                            {"label": "Dividend", "value": "dividend"},
-                                                        ],
-                                                        value="buy",
-                                                    ),
-                                                ], width=6),
-                                            ], className="mb-3"),
+                                                dbc.Col(dbc.Label("Ticker"), width=4),
+                                                dbc.Col(dbc.Input(id="ticker-input", placeholder="e.g. AAPL"), width=8),
+                                            ], className="mb-2"),
                                             dbc.Row([
-                                                dbc.Col([
-                                                    dbc.Label("Shares"),
-                                                    dbc.Input(id="shares-input", type="number", min=0, step=0.01),
-                                                ], width=6),
-                                                dbc.Col([
-                                                    dbc.Label("Price per Share"),
-                                                    dbc.Input(id="price-input", type="number", min=0, step=0.01),
-                                                ], width=6),
-                                            ], className="mb-3"),
+                                                dbc.Col(dbc.Label("Type"), width=4),
+                                                dbc.Col(dcc.Dropdown(
+                                                    id="transaction-type-input",
+                                                    options=[
+                                                        {'label': 'Buy', 'value': 'buy'},
+                                                        {'label': 'Sell', 'value': 'sell'}
+                                                    ],
+                                                    value='buy'
+                                                ), width=8),
+                                            ], className="mb-2"),
                                             dbc.Row([
-                                                dbc.Col([
-                                                    dbc.Label("Currency"),
-                                                    dbc.Select(
-                                                        id="currency-input",
-                                                        options=[
-                                                            {"label": "EUR", "value": "EUR"},
-                                                            {"label": "USD", "value": "USD"},
-                                                            {"label": "GBP", "value": "GBP"},
-                                                        ],
-                                                        value="EUR",
-                                                    ),
-                                                ], width=6),
-                                                dbc.Col([
-                                                    dbc.Label("Transaction Cost"),
-                                                    dbc.Input(id="transaction-cost-input", type="number", min=0, step=0.01, value=7.5, placeholder="Transaction fee"),
-                                                ], width=6),
-                                            ], className="mb-3"),
+                                                dbc.Col(dbc.Label("Shares"), width=4),
+                                                dbc.Col(dbc.Input(id="shares-input", type="number", placeholder="e.g. 10"), width=8),
+                                            ], className="mb-2"),
                                             dbc.Row([
-                                                dbc.Col([
-                                                    dbc.Label("Sell Target Price"),
-                                                    dbc.Input(id="sell-target-input", type="number", min=0, step=0.01, placeholder="Optional"),
-                                                ], width=6),
-                                                dbc.Col([
-                                                    dbc.Label("Date"),
-                                                    html.Div([
-                                                        dcc.DatePickerSingle(
-                                                            id="date-input",
-                                                            date=date.today(),
-                                                            display_format='YYYY-MM-DD',
-                                                            clearable=False,
-                                                            style={
-                                                                'width': '100%',
-                                                            },
-                                                        ),
-                                                    ], style={
-                                                        'width': '100%',
-                                                        'margin-bottom': '0',
-                                                    }),
-                                                ], width=6),
-                                            ], className="mb-3"),
+                                                dbc.Col(dbc.Label("Price"), width=4),
+                                                dbc.Col(dbc.Input(id="price-input", type="number", placeholder="e.g. 150.00"), width=8),
+                                            ], className="mb-2"),
+                                            dbc.Row([
+                                                dbc.Col(dbc.Label("Date"), width=4),
+                                                dbc.Col(dcc.DatePickerSingle(
+                                                    id='transaction-date-input',
+                                                    date=date.today(),
+                                                    display_format='YYYY-MM-DD'
+                                                ), width=8),
+                                            ], className="mb-2"),
+                                            dbc.Row([
+                                                dbc.Col(dbc.Label("Cost"), width=4),
+                                                dbc.Col(dbc.Input(id="cost-input", type="number", value=0, placeholder="e.g. 5.00"), width=8),
+                                            ], className="mb-2"),
                                             dbc.Button("Add Transaction", id="add-transaction-button", color="success", className="mt-3"),
-                                            html.Div(id="transaction-result", className="mt-2"),
                                         ]),
+                                        html.Div(id="transaction-status", className="mt-2"),
                                     ], width=6),
                                 ]),
                             ]),
@@ -437,69 +382,135 @@ def create_layout():
                             ]),
                         ], className="mb-4"),
                     ], width=12),
-                                ]),
-                
-                # Individual Stock Price Chart
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Card([
-                            dbc.CardHeader(html.H4("Individual Stock Price Chart")),
-                            dbc.CardBody([
-                                dbc.Row([
-                                    dbc.Col([
-                                        html.Label("Select Stock", className="mb-2"),
-                                        dcc.Dropdown(
-                                            id='single-stock-selector',
-                                            options=[],  # Will be populated dynamically
-                                            value=None,
-                                            placeholder="Select a stock to view price history...",
-                                            clearable=True,
-                                        ),
-                                    ], width=6),
-                                    dbc.Col([
-                                        dcc.DatePickerRange(
-                                            id='stock-chart-date-range',
-                                            min_date_allowed=date.today() - timedelta(days=365*5),
-                                            max_date_allowed=date.today(),
-                                            start_date=date.today() - timedelta(days=365),
-                                            end_date=date.today(),
-                                            display_format='YYYY-MM-DD'
-                                        ),
-                                    ], width=6),
-                                ], className="mb-4"),
-                                dcc.Graph(id='single-stock-chart'),
-                            ]),
-                        ], className="mb-4"),
-                    ], width=12),
                 ]),
                 
                 # Tax Settings
                 dbc.Row([
                     dbc.Col([
                         dbc.Card([
-                            dbc.CardHeader(html.H4("Tax Settings")),
+                            dbc.CardHeader(html.H4("Tax Settings (Germany)")),
                             dbc.CardBody([
+                                dbc.Checklist(
+                                    options=[
+                                        {'label': 'Married', 'value': 'is_married'},
+                                        {'label': 'Church Tax', 'value': 'church_tax'},
+                                    ],
+                                    value=[],
+                                    id="tax-settings-checklist",
+                                    inline=True,
+                                ),
+                                html.Div(id="tax-settings-status", className="mt-2"),
+                            ]),
+                        ], className="mb-4"),
+                    ], width=12),
+                ]),
+                # Individual Stock Price Chart
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardHeader(html.H4("Individual Stock Price Chart")),
+                            dbc.CardBody([
+                                dcc.Store(id='earning-edit-store'),
                                 dbc.Row([
                                     dbc.Col([
-                                        dbc.Checklist(
-                                            id='tax-settings',
-                                            options=[
-                                                {'label': 'Married (Joint Filing)', 'value': 'married'},
-                                                {'label': 'Church Tax', 'value': 'church_tax'},
-                                                {'label': 'Partial Exemption (Funds)', 'value': 'partial_exemption'},
-                                            ],
-                                            value=[],
-                                        ),
+                                        html.Label("Select Stock"),
+                                        dcc.Dropdown(id="single-stock-selector", options=[], placeholder="Select a stock..."),
                                     ], width=6),
                                     dbc.Col([
-                                        dbc.Button("Update Tax Settings", id="update-tax-button", color="primary"),
-                                        html.Div(id="tax-update-result", className="mt-2"),
+                                        html.Label("Select Date Range"),
+                                        dcc.DatePickerRange(
+                                            id='stock-chart-date-range',
+                                            min_date_allowed=date.today() - timedelta(days=365*10),
+                                            max_date_allowed=date.today(),
+                                            start_date=default_start_date,
+                                            end_date=default_end_date,
+                                            display_format='YYYY-MM-DD'
+                                        ),
                                     ], width=6),
+                                ]),
+                                dcc.Graph(id='single-stock-chart'),
+                                html.Div(id='earnings-table-container', style={'display': 'none'}, children=[
+                                    html.Hr(),
+                                    html.Div([
+                                        html.H5("Earnings Data (EPS)", className="mt-4 d-inline-block"),
+                                        dbc.Button("Add Earning", id="add-earning-button", size="sm", className="ms-2 mb-2", n_clicks=0)
+                                    ], className="d-flex align-items-center"),
+                                    dag.AgGrid(
+                                        id="earnings-table",
+                                        columnDefs=[
+                                            {'headerName': 'ID', 'field': 'id', 'hide': True},
+                                            {'headerName': 'Date', 'field': 'date', 'filter': 'agDateColumnFilter', 'editable': True},
+                                            {'headerName': 'EPS', 'field': 'eps', "sortable": True, 'editable': True, 'valueFormatter': {"function": "d3.format('.2f')(params.value)"}},
+                                            {'headerName': 'Type', 'field': 'type', 'editable': True, 'cellEditor': 'agSelectCellEditor', 'cellEditorParams': {'values': ['quarterly', 'annual']}},
+                                            {'headerName': 'Currency', 'field': 'currency', 'editable': True, 'cellEditor': 'agSelectCellEditor', 'cellEditorParams': {'values': ['USD', 'EUR']}},
+                                        ],
+                                        rowData=[],
+                                        columnSize="sizeToFit",
+                                        defaultColDef={
+                                            "sortable": True,
+                                            "filter": True,
+                                            "floatingFilter": True
+                                        },
+                                        dashGridOptions={
+                                            "rowSelection": "single",
+                                            "getRowId": {"function": "params.data.id"},
+                                            "cellClicked": {"function": "params.api.callbacks.cellClicked(params)"}
+                                        },
+                                    ),
+                                    html.Div(id="earnings-table-status", className="mt-2 text-success"),
                                 ]),
                             ]),
                         ], className="mb-4"),
                     ], width=12),
                 ]),
+                
+                # Earnings Add/Edit Modal
+                dbc.Modal([
+                    dbc.ModalHeader(id="earning-modal-header"),
+                    dbc.ModalBody([
+                        # Store to hold data for add/edit mode
+                        dcc.Store(id='earning-store'),
+                        dbc.Form([
+                            dbc.Row([
+                                dbc.Col(dbc.Label("Date"), width=2),
+                                dbc.Col(dcc.DatePickerSingle(id='earning-date-picker'), width=10),
+                            ], className="mb-3"),
+                            dbc.Row([
+                                dbc.Col(dbc.Label("EPS"), width=2),
+                                dbc.Col(dbc.Input(id='earning-eps-input', type='number', placeholder="Enter EPS"), width=10),
+                            ]),
+                            dbc.Form([
+                                dbc.Label("Type"),
+                                dbc.RadioItems(
+                                    options=[
+                                        {'label': 'Quarterly', 'value': 'quarterly'},
+                                        {'label': 'Annual', 'value': 'annual'},
+                                    ],
+                                    value='quarterly',
+                                    id="earning-type-radios",
+                                    inline=True,
+                                ),
+                            ]),
+                            dbc.Form(
+                                [
+                                    dbc.Label("Currency"),
+                                    dcc.Dropdown(
+                                        id='earning-currency-dropdown',
+                                        options=[
+                                            {'label': 'USD', 'value': 'USD'},
+                                            {'label': 'EUR', 'value': 'EUR'},
+                                        ],
+                                        value='USD'
+                                    ),
+                                ]
+                            ),
+                        ])
+                    ]),
+                    dbc.ModalFooter([
+                        dbc.Button("Save", id="save-earning-button", color="primary", n_clicks=0),
+                        dbc.Button("Cancel", id="cancel-earning-button", color="secondary", n_clicks=0),
+                    ]),
+                ], id="earning-modal", is_open=False),
                 
                 # Footer
                 dbc.Row([
