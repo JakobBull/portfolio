@@ -417,16 +417,25 @@ def create_layout():
                                         dcc.Dropdown(id="single-stock-selector", options=[], placeholder="Select a stock..."),
                                     ], width=6),
                                     dbc.Col([
-                                        html.Label("Select Date Range"),
-                                        dcc.DatePickerRange(
-                                            id='stock-chart-date-range',
+                                        html.Label("Start Date"),
+                                        dcc.DatePickerSingle(
+                                            id='stock-chart-start-date',
                                             min_date_allowed=date.today() - timedelta(days=365*10),
                                             max_date_allowed=date.today(),
-                                            start_date=default_start_date,
-                                            end_date=default_end_date,
+                                            date=default_start_date,
                                             display_format='YYYY-MM-DD'
                                         ),
-                                    ], width=6),
+                                    ], width=3),
+                                    dbc.Col([
+                                        html.Label("End Date"),
+                                        dcc.DatePickerSingle(
+                                            id='stock-chart-end-date',
+                                            min_date_allowed=date.today() - timedelta(days=365*10),
+                                            max_date_allowed=date.today(),
+                                            date=default_end_date,
+                                            display_format='YYYY-MM-DD'
+                                        ),
+                                    ], width=3),
                                 ]),
                                 dcc.Graph(id='single-stock-chart'),
                                 html.Div(id='earnings-table-container', style={'display': 'none'}, children=[

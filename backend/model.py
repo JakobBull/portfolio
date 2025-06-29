@@ -47,15 +47,15 @@ class FundamentalValuationModel:
         # Model parameters (fitted values)
         self.pe_d_coeff = None    # Coefficient for PE * d * E term
         self.gamma = None         # Coefficient for earnings trend
-        self.constant = None      # Constant term
+        self.constant = None      # Intercept term
         
         # Model components
         self.scaler = StandardScaler()
-        self.ridge_model = Ridge(alpha=self.ridge_alpha, fit_intercept=False)
+        self.ridge_model = Ridge(alpha=self.ridge_alpha, fit_intercept=True)
         
         # Fitted model info
         self.is_fitted = False
-        self.feature_names = ['pe_d_earnings', 'earnings_trend', 'constant']
+        self.feature_names = ['pe_d_earnings', 'earnings_trend']
         
     def _get_earnings_data(self, ticker: str, start_date: date, end_date: date) -> pd.DataFrame:
         """
@@ -261,9 +261,17 @@ class FundamentalValuationModel:
         # Use monthly sampling to reduce overfitting
         price_data_monthly = price_data.set_index('date').resample('ME').last().reset_index()
         
+        # Add lagged price for feature engineering to prevent data leakage
+        price_data_monthly['lagged_price'] = price_data_monthly['price'].shift(1)
+        
         for _, row in price_data_monthly.iterrows():
             ref_date = row['date']
             target_price = row['price']
+            lagged_price = row['lagged_price']
+
+            # Skip if no valid price or lagged price
+            if pd.isna(target_price) or pd.isna(lagged_price):
+                continue
             
             # Calculate trailing 12M earnings
             trailing_earnings = self._calculate_trailing_12m_earnings(earnings_data, ref_date)
@@ -271,10 +279,8 @@ class FundamentalValuationModel:
             if trailing_earnings <= 0:
                 continue  # Skip if no positive earnings
             
-            # Calculate PE ratio (we'll smooth it later across all data points)
-            current_pe = target_price / trailing_earnings if trailing_earnings > 0 else np.nan
-            if pd.isna(current_pe):
-                continue
+            # Calculate PE ratio using LAGGED price to prevent data leakage
+            current_pe = lagged_price / trailing_earnings
             
             # Calculate earnings trend
             earnings_trend = self._calculate_earnings_trend(
@@ -309,14 +315,50 @@ class FundamentalValuationModel:
         # Feature 2: Earnings trend
         features_df['earnings_trend'] = features_df['earnings_trend']
         
-        # Feature 3: Constant term
-        features_df['constant'] = 1.0
-        
         # Select only the model features
         model_features = features_df[self.feature_names]
         target_series = pd.Series(targets, index=features_df.index)
         
         return model_features, target_series
+    
+    def _calculate_historical_smoothed_pe(self, ticker: str, start_date: date, end_date: date) -> Optional[pd.Series]:
+        """
+        Calculates a time series of exponentially smoothed PE ratios.
+        This method is safe from lookahead bias.
+        """
+        price_data = self._get_price_data(ticker, start_date, end_date)
+        earnings_data = self._get_earnings_data(ticker, start_date, end_date)
+
+        if price_data.empty or earnings_data.empty:
+            logger.warning(f"Insufficient historical data for {ticker} to calculate smoothed PE series.")
+            return None
+
+        price_data_resampled = price_data.set_index('date').resample('W').last()
+
+        features_list = []
+        for ref_date, row in price_data_resampled.iterrows():
+            if pd.isna(row['price']):
+                continue
+
+            trailing_earnings = self._calculate_trailing_12m_earnings(earnings_data, ref_date)
+            
+            if trailing_earnings > 0:
+                current_pe = row['price'] / trailing_earnings
+                features_list.append({'date': ref_date, 'raw_pe': current_pe})
+
+        if not features_list:
+            logger.warning(f"No valid PE ratios found for {ticker} in the period.")
+            return None
+            
+        pe_df = pd.DataFrame(features_list).set_index('date')
+        
+        # Exponential smoothing. adjust=False ensures it's a simple EWM without lookahead bias.
+        smoothed_pe_series = pe_df['raw_pe'].ewm(alpha=self.alpha, adjust=False).mean()
+        
+        # Constrain PE ratio
+        smoothed_pe_series = np.clip(smoothed_pe_series, 3.0, 90.0)
+        
+        return smoothed_pe_series
     
     def fit(self, ticker: str, start_date: date, end_date: date) -> Dict[str, Any]:
         """
@@ -340,21 +382,25 @@ class FundamentalValuationModel:
             return {'success': False, 'error': 'No training data available'}
         
         try:
-            # Fit the model with Ridge regression
-            self.ridge_model.fit(X, y)
+            # Scale features
+            X_scaled = self.scaler.fit_transform(X)
             
-            # Extract coefficients
+            # Fit the model with Ridge regression
+            self.ridge_model.fit(X_scaled, y)
+            
+            # Extract coefficients and intercept
             coefficients = self.ridge_model.coef_
+            intercept = self.ridge_model.intercept_
             
             # Map coefficients to model parameters
             self.pe_d_coeff = coefficients[0]  # This represents PE * d coefficient
             self.gamma = coefficients[1]       # Earnings trend coefficient
-            self.constant = max(0.0, coefficients[2])  # Constant (constrained >= 0)
+            self.constant = max(0.0, intercept)  # Intercept (constrained >= 0)
             
             self.is_fitted = True
             
             # Calculate performance metrics
-            y_pred = self.ridge_model.predict(X)
+            y_pred = self.ridge_model.predict(X_scaled)
             mse = mean_squared_error(y, y_pred)
             r2 = r2_score(y, y_pred)
             
@@ -396,38 +442,41 @@ class FundamentalValuationModel:
             # Get required data for prediction
             start_date = prediction_date - timedelta(days=730)  # 2 years for trend
             
+            # Get the most recent smoothed PE value
+            smoothed_pe_series = self._calculate_historical_smoothed_pe(ticker, start_date, prediction_date)
+            if smoothed_pe_series is None or smoothed_pe_series.empty:
+                logger.error(f"Could not calculate smoothed PE for {ticker} on {prediction_date}")
+                return None
+            estimated_pe = smoothed_pe_series.iloc[-1]
+            
             earnings_data = self._get_earnings_data(ticker, start_date, prediction_date)
             if earnings_data.empty:
                 logger.error(f"No earnings data available for {ticker} prediction")
                 return None
             
-            # Calculate features
-            trailing_earnings = self._calculate_trailing_12m_earnings(
-                earnings_data, pd.Timestamp(prediction_date)
-            )
+            # Calculate trailing 12M earnings
+            trailing_earnings = self._calculate_trailing_12m_earnings(earnings_data, pd.Timestamp(prediction_date))
             
             if trailing_earnings <= 0:
                 logger.warning(f"No positive earnings for {ticker}, cannot predict")
                 return None
             
+            # Calculate earnings trend
             earnings_trend = self._calculate_earnings_trend(
                 earnings_data, pd.Series([pd.Timestamp(prediction_date)])
             ).iloc[0]
             
-            # Estimate current PE (use historical average or market PE)
-            # For simplicity, we'll use a reasonable market PE
-            estimated_pe = 15.0
-            estimated_pe = np.clip(estimated_pe, 3.0, 90.0)
-            
             # Create feature vector
-            features = np.array([
-                estimated_pe * trailing_earnings,  # pe_d_earnings
-                earnings_trend,                    # earnings_trend
-                1.0                               # constant
-            ]).reshape(1, -1)
+            features_df = pd.DataFrame(
+                [[estimated_pe * trailing_earnings, earnings_trend]], 
+                columns=self.feature_names
+            )
+            
+            # Scale features using the fitted scaler
+            features_scaled = self.scaler.transform(features_df)
             
             # Make prediction
-            predicted_price = self.ridge_model.predict(features)[0]
+            predicted_price = self.ridge_model.predict(features_scaled)[0]
             
             # Ensure positive price prediction
             predicted_price = max(0.0, predicted_price)
@@ -499,12 +548,17 @@ class FundamentalValuationModel:
                 X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
                 y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
                 
+                # Scale features: fit on train, transform both
+                fold_scaler = StandardScaler()
+                X_train_scaled = fold_scaler.fit_transform(X_train)
+                X_test_scaled = fold_scaler.transform(X_test)
+                
                 # Fit model on train set
-                temp_model = Ridge(alpha=self.ridge_alpha, fit_intercept=False)
-                temp_model.fit(X_train, y_train)
+                temp_model = Ridge(alpha=self.ridge_alpha, fit_intercept=True)
+                temp_model.fit(X_train_scaled, y_train)
                 
                 # Predict on test set
-                y_pred = temp_model.predict(X_test)
+                y_pred = temp_model.predict(X_test_scaled)
                 
                 # Calculate metrics
                 cv_scores.append(r2_score(y_test, y_pred))
@@ -542,24 +596,22 @@ class FundamentalValuationModel:
             return None
         
         try:
-            # Get price and earnings data
-            price_data = self._get_price_data(ticker, start_date, end_date)
+            # Calculate smoothed PE series for the entire period
+            smoothed_pe_series = self._calculate_historical_smoothed_pe(ticker, start_date, end_date)
+            if smoothed_pe_series is None:
+                logger.error(f"Could not generate smoothed PE series for {ticker}")
+                return None
+
             earnings_data = self._get_earnings_data(ticker, start_date, end_date)
-            
-            if price_data.empty or earnings_data.empty:
-                logger.error(f"Insufficient data for {ticker} fundamental value series")
+            if earnings_data.empty:
+                logger.error(f"Insufficient earnings data for {ticker} fundamental value series")
                 return None
             
-            # Generate fundamental values for each date
+            # Generate fundamental values for each date in the smoothed PE series
             fundamental_values = []
             dates = []
             
-            # Use weekly sampling for smoother visualization
-            price_data_weekly = price_data.set_index('date').resample('W').last().reset_index()
-            
-            for _, row in price_data_weekly.iterrows():
-                ref_date = row['date']
-                
+            for ref_date, smoothed_pe in smoothed_pe_series.items():
                 # Calculate trailing 12M earnings
                 trailing_earnings = self._calculate_trailing_12m_earnings(earnings_data, ref_date)
                 
@@ -571,19 +623,17 @@ class FundamentalValuationModel:
                     earnings_data, pd.Series([ref_date])
                 ).iloc[0]
                 
-                # Estimate PE ratio (for prediction, we use a market average)
-                estimated_pe = 15.0
-                estimated_pe = np.clip(estimated_pe, 3.0, 90.0)
-                
                 # Create feature vector
-                features = np.array([
-                    estimated_pe * trailing_earnings,  # pe_d_earnings
-                    earnings_trend,                    # earnings_trend
-                    1.0                               # constant
-                ]).reshape(1, -1)
+                features_df = pd.DataFrame(
+                    [[smoothed_pe * trailing_earnings, earnings_trend]],
+                    columns=self.feature_names
+                )
+                
+                # Scale features before prediction
+                features_scaled = self.scaler.transform(features_df)
                 
                 # Predict fundamental value
-                fundamental_value = self.ridge_model.predict(features)[0]
+                fundamental_value = self.ridge_model.predict(features_scaled)[0]
                 fundamental_value = max(0.0, fundamental_value)
                 
                 fundamental_values.append(fundamental_value)

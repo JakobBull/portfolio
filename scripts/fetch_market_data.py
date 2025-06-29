@@ -144,15 +144,13 @@ def fetch_and_store_market_data():
             logging.info("No tickers found in the database. Nothing to fetch.")
             return
 
-        default_start_date_str = os.environ.get("START_DATE", "2020-01-01")
-        default_start_date = datetime.strptime(default_start_date_str, "%Y-%m-%d").date()
         end_date = date.today()
 
         tickers_by_start_date = {}
         logging.info("Checking for latest price data for each ticker...")
         for ticker in all_tickers:
             latest_price = db_manager.get_latest_stock_price(ticker)
-            start_date = default_start_date
+            start_date = None
             if latest_price and latest_price.date:
                 # If we have data, start fetching from the next day
                 start_date = latest_price.date + timedelta(days=1)
@@ -165,11 +163,11 @@ def fetch_and_store_market_data():
         logging.info("Finished grouping tickers by fetch start date.")
 
         for start_date, tickers_in_group in tickers_by_start_date.items():
-            if start_date >= end_date:
+            if start_date and start_date >= end_date:
                 logging.info(f"Tickers {tickers_in_group} are already up-to-date. Skipping.")
                 continue
 
-            logging.info(f"Fetching data for {len(tickers_in_group)} tickers from {start_date} to {end_date} (converting to EUR).")
+            logging.info(f"Fetching data for {len(tickers_in_group)} tickers from {start_date or 'inception'} to {end_date} (converting to EUR).")
             
             batch_size = 10
             for i in range(0, len(tickers_in_group), batch_size):
@@ -205,7 +203,7 @@ def fetch_and_store_market_data():
         
         for ticker in all_tickers:
             latest_dividend_date = db_manager.get_latest_dividend_date(ticker)
-            dividend_start_date = default_start_date
+            dividend_start_date = None
             if latest_dividend_date:
                 # If we have dividend data, start fetching from the next day
                 dividend_start_date = latest_dividend_date + timedelta(days=1)
@@ -218,11 +216,11 @@ def fetch_and_store_market_data():
         logging.info("Finished grouping tickers by dividend fetch start date.")
 
         for start_date, tickers_in_group in tickers_by_dividend_start_date.items():
-            if start_date >= end_date:
+            if start_date and start_date >= end_date:
                 logging.info(f"Dividend data for tickers {tickers_in_group} is already up-to-date. Skipping.")
                 continue
 
-            logging.info(f"Fetching dividend data for {len(tickers_in_group)} tickers from {start_date} to {end_date} (converting to EUR).")
+            logging.info(f"Fetching dividend data for {len(tickers_in_group)} tickers from {start_date or 'inception'} to {end_date} (converting to EUR).")
             
             # Process dividends in smaller batches to be respectful to the API
             batch_size = 5  # Smaller batch size for dividends since they're fetched individually

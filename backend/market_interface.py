@@ -185,14 +185,14 @@ class MarketInterface:
         logger.info(f"Successfully processed info for {len(tickers)} tickers.")
         return all_info
 
-    def get_historical_prices_for_tickers(self, tickers: list[str], start_date: date, end_date: date, target_currency: str | None = None) -> pd.DataFrame | None:
+    def get_historical_prices_for_tickers(self, tickers: list[str], start_date: date | None, end_date: date, target_currency: str | None = None) -> pd.DataFrame | None:
         """
         Get historical prices for a list of tickers with a robust retry mechanism.
         If the batch download fails, it will attempt to download tickers individually.
         
         Args:
             tickers (list[str]): List of stock ticker symbols
-            start_date (date): Start date for historical data
+            start_date (date | None): Start date for historical data. If None, fetches full history.
             end_date (date): End date for historical data
             target_currency (str, optional): Currency to convert all prices to. If None, keeps original currencies.
             
@@ -202,9 +202,16 @@ class MarketInterface:
         self._rate_limit()
         
         try:
-            ticker_str = " ".join(tickers)
-            data = yf.download(ticker_str, start=start_date, end=end_date, group_by='ticker', auto_adjust=True, session=self.session)
+            # Use yf.Tickers for a batch request with our compatible session
+            ticker_objects = yf.Tickers(tickers, session=self.session)
             
+            # Fetch historical data using the .history() method on the Tickers object
+            if start_date:
+                data = ticker_objects.history(start=start_date, end=end_date, auto_adjust=True, group_by='ticker')
+            else:
+                print(f"Fetching full history for {tickers}")
+                data = ticker_objects.history(period="max", end=end_date, auto_adjust=True, group_by='ticker')
+
             # Check for failure: yfinance sometimes returns a DataFrame with NaNs or is empty on failure.
             if data.empty:
                 raise MarketDataError("Empty dataframe returned, possibly rate-limited.")
@@ -224,7 +231,7 @@ class MarketInterface:
             
             # Convert currencies if target_currency is specified
             if target_currency:
-                data = self._convert_dataframe_currencies(data, tickers, target_currency, start_date, end_date)
+                data = self._convert_dataframe_currencies(data, tickers, target_currency)
             
             return data
         except Exception as e:
@@ -233,13 +240,13 @@ class MarketInterface:
                 logger.warning(f"Batch request for {tickers} failed: {e}. Falling back to individual fetching.")
                 fallback_data = self._fetch_tickers_individually(tickers, start_date, end_date)
                 if fallback_data is not None and target_currency:
-                    fallback_data = self._convert_dataframe_currencies(fallback_data, tickers, target_currency, start_date, end_date)
+                    fallback_data = self._convert_dataframe_currencies(fallback_data, tickers, target_currency)
                 return fallback_data
             else:
                 logger.error(f"An unexpected error occurred fetching historical data for {tickers}: {e}")
                 return None
 
-    def _fetch_tickers_individually(self, tickers: list[str], start_date: date, end_date: date) -> pd.DataFrame | None:
+    def _fetch_tickers_individually(self, tickers: list[str], start_date: date | None, end_date: date) -> pd.DataFrame | None:
         """Fallback to fetch tickers one by one if batch request fails."""
         logger.info(f"Batch request failed for {tickers}. Falling back to individual fetching.")
         all_data = []
@@ -254,9 +261,15 @@ class MarketInterface:
                     # Rate limit each individual request
                     self._rate_limit()
                     
-                    data = yf.download(ticker, start=start_date, end=end_date, auto_adjust=True, session=self.session)
+                    # Use yf.Ticker(...).history() for individual fetching
+                    stock = yf.Ticker(ticker, session=self.session)
+                    if start_date:
+                        data = stock.history(start=start_date, end=end_date, auto_adjust=True)
+                    else:
+                        data = stock.history(period="max", end=end_date, auto_adjust=True)
                     
                     if not data.empty:
+                        # For consistency with batch download, create a MultiIndex
                         data.columns = pd.MultiIndex.from_product([[ticker], data.columns])
                         all_data.append(data)
                         break  # Success, exit retry loop for this ticker
@@ -289,7 +302,7 @@ class MarketInterface:
         combined_df = pd.concat(all_data, axis=1)
         return combined_df
 
-    def _convert_dataframe_currencies(self, data: pd.DataFrame, tickers: list[str], target_currency: str, start_date: date, end_date: date) -> pd.DataFrame:
+    def _convert_dataframe_currencies(self, data: pd.DataFrame, tickers: list[str], target_currency: str) -> pd.DataFrame:
         """
         Convert all prices in a multi-ticker DataFrame to the target currency.
         
@@ -297,8 +310,6 @@ class MarketInterface:
             data (pd.DataFrame): DataFrame with multi-level columns (ticker, price_type)
             tickers (list[str]): List of ticker symbols
             target_currency (str): Target currency for conversion
-            start_date (date): Start date for exchange rate lookups
-            end_date (date): End date for exchange rate lookups
             
         Returns:
             pd.DataFrame: DataFrame with prices converted to target currency
@@ -360,14 +371,14 @@ class MarketInterface:
         logger.info(f"Successfully converted prices to {target_currency} for {len(tickers)} tickers")
         return converted_data
 
-    def get_historical_dividends_for_tickers(self, tickers: list[str], start_date: date, end_date: date, target_currency: str | None = None) -> dict[str, pd.Series] | None:
+    def get_historical_dividends_for_tickers(self, tickers: list[str], start_date: date | None, end_date: date, target_currency: str | None = None) -> dict[str, pd.Series] | None:
         """
         Get historical dividends for a list of tickers with a robust retry mechanism.
         If the batch request fails, it will attempt to download tickers individually.
         
         Args:
             tickers (list[str]): List of stock ticker symbols
-            start_date (date): Start date for historical dividend data
+            start_date (date | None): Start date for historical dividend data. If None, fetches full history.
             end_date (date): End date for historical dividend data
             target_currency (str, optional): Currency to convert all dividends to. If None, keeps original currencies.
             
@@ -404,10 +415,10 @@ class MarketInterface:
                         continue
                     
                     # Filter by date range
-                    filtered_dividends = dividends[
-                        (dividends.index.date >= start_date) & 
-                        (dividends.index.date <= end_date)
-                    ]
+                    mask = (dividends.index.date <= end_date)
+                    if start_date:
+                        mask &= (dividends.index.date >= start_date)
+                    filtered_dividends = dividends[mask]
                     
                     if filtered_dividends.empty:
                         logger.info(f"No dividend data in date range for {ticker}")

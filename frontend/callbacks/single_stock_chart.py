@@ -30,8 +30,8 @@ def register_callbacks(app, controller: Controller):
         Output("single-stock-chart", "figure"),
         [
             Input("single-stock-selector", "value"),
-            Input("stock-chart-date-range", "start_date"),
-            Input("stock-chart-date-range", "end_date"),
+            Input("stock-chart-start-date", "date"),
+            Input("stock-chart-end-date", "date"),
         ],
     )
     def update_single_stock_chart(selected_ticker, start_date_str, end_date_str):
