@@ -43,21 +43,17 @@ def register_callbacks(app, controller: Controller):
         if transaction_result and transaction_result.get('status') != 'success':
             return dash.no_update
 
-        try:
-            start_date = date.fromisoformat(start_date_str)
-            end_date = date.fromisoformat(end_date_str)
+        #try:
+        start_date = date.fromisoformat(start_date_str)
+        end_date = date.fromisoformat(end_date_str)
 
-            # --- Portfolio Data ---
-            portfolio_hist = controller.get_historical_portfolio_value(start_date, end_date)
-            portfolio_df = pd.DataFrame(
-                list(portfolio_hist.items()), columns=["Date", "Value"]
-            ).set_index("Date")
-            
-            # Normalize portfolio value
-            portfolio_df["Normalized"] = (portfolio_df["Value"] / portfolio_df["Value"].iloc[0]) * 100
+        # --- Portfolio Data ---
+        portfolio_perf = controller.get_portfolio_performance_twrr(start_date, end_date)
+        
+        fig = go.Figure()
 
-            # --- Chart Creation ---
-            fig = go.Figure()
+        if not portfolio_perf.empty:
+            portfolio_df = pd.DataFrame(portfolio_perf).rename(columns={"return_factor": "Normalized"})
             fig.add_trace(
                 go.Scatter(
                     x=portfolio_df.index,
@@ -68,58 +64,58 @@ def register_callbacks(app, controller: Controller):
                 )
             )
 
-            # --- Benchmark Data ---
-            benchmark_map = {"NASDAQ": "^IXIC", "S&P 500": "^GSPC", "DAX 30": "^GDAXI"}
-            for benchmark_name in selected_benchmarks:
-                ticker = benchmark_map.get(benchmark_name)
-                if ticker:
-                    benchmark_series = controller.get_benchmark_data(ticker, start_date, end_date)
-                    if benchmark_series is not None and not benchmark_series.empty:
-                        # Normalize benchmark data
-                        benchmark_series_normalized = (benchmark_series / benchmark_series.iloc[0]) * 100
-                        fig.add_trace(
-                            go.Scatter(
-                                x=benchmark_series_normalized.index,
-                                y=benchmark_series_normalized,
-                                mode="lines",
-                                name=benchmark_name,
-                                line=dict(dash='dash')  # Make benchmarks dashed
-                            )
+        # --- Benchmark Data ---
+        benchmark_map = {"NASDAQ": "^IXIC", "S&P 500": "^GSPC", "DAX 30": "^GDAXI"}
+        for benchmark_name in selected_benchmarks:
+            ticker = benchmark_map.get(benchmark_name)
+            if ticker:
+                benchmark_series = controller.get_benchmark_data(ticker, start_date, end_date)
+                if benchmark_series is not None and not benchmark_series.empty:
+                    # Normalize benchmark data
+                    benchmark_series_normalized = (benchmark_series / benchmark_series.iloc[0]) * 100
+                    fig.add_trace(
+                        go.Scatter(
+                            x=benchmark_series_normalized.index,
+                            y=benchmark_series_normalized,
+                            mode="lines",
+                            name=benchmark_name,
+                            line=dict(dash='dash')  # Make benchmarks dashed
                         )
+                    )
 
-            # --- Individual Stock Data ---
-            if selected_stocks:
-                for stock_ticker in selected_stocks:
-                    stock_series = controller.get_stock_historical_data(stock_ticker, start_date, end_date)
-                    if stock_series is not None and not stock_series.empty:
-                        # Normalize stock data
-                        stock_series_normalized = (stock_series / stock_series.iloc[0]) * 100
-                        fig.add_trace(
-                            go.Scatter(
-                                x=stock_series_normalized.index,
-                                y=stock_series_normalized,
-                                mode="lines",
-                                name=stock_ticker,
-                                line=dict(width=1, dash='dot')  # Make stocks thinner and dotted
-                            )
+        # --- Individual Stock Data ---
+        if selected_stocks:
+            for stock_ticker in selected_stocks:
+                stock_series = controller.get_stock_historical_data(stock_ticker, start_date, end_date)
+                if stock_series is not None and not stock_series.empty:
+                    # Normalize stock data
+                    stock_series_normalized = (stock_series / stock_series.iloc[0]) * 100
+                    fig.add_trace(
+                        go.Scatter(
+                            x=stock_series_normalized.index,
+                            y=stock_series_normalized,
+                            mode="lines",
+                            name=stock_ticker,
+                            line=dict(width=1, dash='dot')  # Make stocks thinner and dotted
                         )
+                    )
 
-            fig.update_layout(
-                title="Portfolio Performance vs. Benchmarks & Individual Stocks",
-                xaxis_title="Date",
-                yaxis_title="Value (Normalized to 100)",
-                template="plotly_white",
-                legend=dict(
-                    orientation="h",
-                    yanchor="bottom",
-                    y=1.02,
-                    xanchor="right",
-                    x=1
-                )
+        fig.update_layout(
+            title="Portfolio Performance vs. Benchmarks & Individual Stocks",
+            xaxis_title="Date",
+            yaxis_title="Value (Normalized to 100)",
+            template="plotly_white",
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
             )
-            return fig
+        )
+        return fig
 
-        except Exception as e:
-            logging.error(f"Error updating performance chart: {e}")
-            # Return an empty figure on error
-            return go.Figure().update_layout(title="Error loading chart") 
+        # except Exception as e:
+        #     logging.error(f"Error updating performance chart: {e}")
+        #     # Return an empty figure on error
+        #     return go.Figure().update_layout(title="Error loading chart") 

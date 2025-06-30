@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any, List, Tuple, Union
 import logging
 from sqlalchemy import create_engine, Column, Integer, Float, String, Boolean, Date, ForeignKey, DateTime, Text, func, Enum, UniqueConstraint
 from sqlalchemy.orm import sessionmaker, relationship, Session, declarative_base, joinedload
+from sqlalchemy.sql import case
 import pandas as pd
 from io import StringIO
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -247,6 +248,45 @@ class DatabaseManager:
                 StockPrice.date <= end_date
             ).order_by(StockPrice.date).all()
     
+    def get_daily_cash_flows(self, start_date: datetime.date, end_date: datetime.date) -> pd.Series:
+        """Calculate daily net cash flows from transactions."""
+        with self.session_scope() as session:
+            # Query for buy/sell transactions
+            buy_sell_flows = session.query(
+                Transaction.date,
+                func.sum(case(
+                    (Transaction.type == 'buy', Transaction.amount * Transaction.price + Transaction.cost),
+                    (Transaction.type == 'sell', -(Transaction.amount * Transaction.price - Transaction.cost)),
+                    else_=0
+                )).label('flow')
+            ).filter(
+                Transaction.date.between(start_date, end_date),
+                Transaction.type.in_(['buy', 'sell'])
+            ).group_by(Transaction.date).all()
+
+            # Query for dividend transactions
+            dividend_flows = session.query(
+                Transaction.date,
+                func.sum(Transaction.amount * Transaction.price).label('flow')
+            ).filter(
+                Transaction.date.between(start_date, end_date),
+                Transaction.type == 'dividend'
+            ).group_by(Transaction.date).all()
+
+            # Combine flows into a dictionary
+            flows = {}
+            for date, flow in buy_sell_flows:
+                flows[date] = flows.get(date, 0) + float(flow)
+            for date, flow in dividend_flows:
+                flows[date] = flows.get(date, 0) + float(flow)
+
+            # Create a pandas Series
+            if flows:
+                cash_flow_series = pd.Series(flows).sort_index()
+                return cash_flow_series
+            else:
+                return pd.Series(dtype=float)
+
     def get_stock_price_at_date(self, ticker: str, target_date: datetime.date) -> Optional[float]:
         """Get stock price for a specific date, or closest available date"""
         with self.session_scope() as session:

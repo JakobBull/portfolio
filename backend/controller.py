@@ -157,6 +157,52 @@ class Controller:
         # Convert pandas Series to dict with date keys
         return {timestamp.date(): value for timestamp, value in values_series.items()}
 
+    def get_portfolio_performance_twrr(self, start_date: date, end_date: date) -> pd.Series:
+        """
+        Calculates the time-weighted rate of return for the portfolio.
+        Returns a series of normalized values starting at 100.
+        """
+        portfolio_values = self.db_manager.get_portfolio_values_over_time(start_date, end_date)
+        if portfolio_values.empty:
+            return pd.Series(dtype=float)
+
+        cash_flows = self.db_manager.get_daily_cash_flows(start_date, end_date)
+
+        df = pd.DataFrame({'value': portfolio_values})
+        df['cash_flow'] = cash_flows
+        df['cash_flow'] = df['cash_flow'].fillna(0)
+
+        # Get previous day's value
+        df['prev_day_value'] = df['value'].shift(1)
+        
+        # For the first day, get value from DB
+        prev_day_value = self.db_manager.get_portfolio_value_at_date(start_date - timedelta(days=1))
+        df.iloc[0, df.columns.get_loc('prev_day_value')] = prev_day_value
+
+        # The denominator for HPR is previous day's value + today's cash flow
+        df['denominator'] = df['prev_day_value'] + df['cash_flow']
+        
+        # Calculate daily return factor (1 + HPR)
+        # HPR = (value / denominator) - 1
+        df['return_factor'] = df['value'] / df['denominator']
+        
+        # Handle cases where denominator is 0 (e.g. first investment)
+        # If value > 0 and denominator is 0, it means the portfolio started from 0,
+        # so the return factor is based on the cash injected.
+        # This case is tricky. A simple approach is to treat return as 0 if prev_day_value is 0.
+        df.loc[df['prev_day_value'] == 0, 'return_factor'] = 1
+        
+        # On days with cashflow but no previous value, the capital itself is not a return.
+        df.loc[(df['prev_day_value'] == 0) & (df['cash_flow'] > 0), 'return_factor'] = 1
+
+        df['return_factor'] = df['return_factor'].fillna(1)
+        df = df.replace([np.inf, -np.inf], 1) # Replace inf with 1 (no change)
+
+        # Calculate cumulative performance
+        performance = df['return_factor'].cumprod() * 100
+        
+        return performance
+
     def get_benchmark_data(self, ticker: str, start_date: date, end_date: date) -> pd.Series | None:
         """Fetches benchmark data from the database."""
         try:
