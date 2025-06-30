@@ -384,26 +384,6 @@ def create_layout():
                     ], width=12),
                 ]),
                 
-                # Tax Settings
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Card([
-                            dbc.CardHeader(html.H4("Tax Settings (Germany)")),
-                            dbc.CardBody([
-                                dbc.Checklist(
-                                    options=[
-                                        {'label': 'Married', 'value': 'is_married'},
-                                        {'label': 'Church Tax', 'value': 'church_tax'},
-                                    ],
-                                    value=[],
-                                    id="tax-settings-checklist",
-                                    inline=True,
-                                ),
-                                html.Div(id="tax-settings-status", className="mt-2"),
-                            ]),
-                        ], className="mb-4"),
-                    ], width=12),
-                ]),
                 # Individual Stock Price Chart
                 dbc.Row([
                     dbc.Col([

@@ -36,6 +36,17 @@ def register_callbacks(app, controller):
             )
             sector_fig.update_traces(textinfo="percent+label")
 
+            # --- Country Breakdown Chart ---
+            country_df = df.groupby("country")["market_value"].sum().reset_index()
+            country_fig = px.pie(
+                country_df,
+                values="market_value",
+                names="country",
+                title="Portfolio by Country",
+                hole=0.4,
+            )
+            country_fig.update_traces(textinfo="percent+label")
+
             # --- Currency Breakdown Chart ---
             currency_df = df.groupby("currency")["market_value"].sum().reset_index()
             currency_fig = px.pie(
@@ -47,7 +58,7 @@ def register_callbacks(app, controller):
             )
             currency_fig.update_traces(textinfo="percent+label")
 
-            return sector_fig, currency_fig, currency_fig
+            return sector_fig, country_fig, currency_fig
 
         except Exception as e:
             logging.error(f"Error creating breakdown charts: {e}")
